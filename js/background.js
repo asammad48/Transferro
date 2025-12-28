@@ -1,155 +1,266 @@
 /**
- * @fileoverview This is the background service worker for the extension.
- * It acts as the central controller for the automation process, managing state,
- * listening to events, and coordinating actions between the popup and content scripts.
- * It is designed to be event-driven and stateless where possible.
+ * @fileoverview Service worker for the booking automation extension.
+ * Manages the automation state machine, user settings, and communication
+ * between the popup, content scripts, and the Chrome Extension API.
  */
 
-// Phase 5 & 7: Background Script Logic
-console.log('Background service worker started.');
+// =================================================================
+// STATE MANAGEMENT & SAFETY
+// =================================================================
 
-/**
- * In-memory storage for the tab ID of the new ride page.
- * This is stored temporarily to ensure that the final "accept" command is sent
- * to the correct, user-initiated tab, preventing mis-clicks on other tabs.
- * It is reset after the flow is complete or fails.
- */
-let newRideTabId = null;
+// In-memory state variables. These are reset if the service worker is terminated.
+let automationInProgress = false;
+let activeTabId = null;
+let currentConfig = {};
 
-/**
- * Main message listener for all communications from other parts of the extension.
- * It acts as a router, delegating tasks based on the 'action' property of the message.
- * This is the primary way the background script receives commands.
- */
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  switch (message.action) {
-    // This action is triggered by the user clicking "Proceed" in the popup.
-    case 'startBooking':
-      console.log('Action: startBooking');
-      handleStartBooking(sendResponse);
-      return true; // Indicates that the response will be sent asynchronously.
-
-    // This action is sent from the content script after it has successfully selected the vehicle.
-    case 'phase9_readyToAccept':
-      console.log('Action: phase9_readyToAccept');
-      handleReadyToAccept(sender.tab.id, sendResponse);
-      return true; // Indicates an asynchronous response.
-
-    default:
-      console.warn('Unknown message action received:', message.action);
-      sendResponse({ status: 'error', message: 'Unknown action' });
-      break;
-  }
-  return false; // No async response for synchronous actions.
+// Persist the automation state to handle service worker termination
+chrome.runtime.onStartup.addListener(() => {
+  chrome.storage.local.set({ automation_in_progress: false });
 });
 
+
 /**
- * Handles the initial 'startBooking' request from the popup.
- * It retrieves user settings and injects the content script into the active tab.
- * This is the start of the automation flow.
+ * Logs a message to the popup and the service worker console.
+ * @param {string} text The message to log.
+ * @param {'info' | 'error' | 'success'} level The log level.
  */
-function handleStartBooking(sendResponse) {
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (tabs.length === 0) {
-      console.error('No active tab found.');
-      sendResponse({ status: 'error', message: 'No active tab.' });
+function log(text, level = 'info') {
+    console.log(`[LOG] ${level.toUpperCase()}: ${text}`);
+    chrome.runtime.sendMessage({ type: 'log', text, level }).catch(err => console.log('Popup not open.'));
+}
+
+/**
+ * Resets the automation state, enabling the user to start a new run.
+ * @param {string} reason The reason for resetting the state.
+ * @param {'info' | 'error' | 'success'} level The log level for the final message.
+ */
+function resetState(reason, level = 'info') {
+    automationInProgress = false;
+    activeTabId = null;
+    chrome.storage.local.set({ automation_in_progress: false });
+
+    // Notify the popup that the process has finished
+    const messageType = level === 'error' ? 'automation_aborted' : 'automation_finished';
+    chrome.runtime.sendMessage({ type: messageType }).catch(err => {});
+
+    log(reason, level);
+}
+
+// =================================================================
+// MESSAGE HANDLING
+// =================================================================
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // --- Message from Popup ---
+    if (message.action === 'startAutomation') {
+        if (automationInProgress) {
+            log('An automation process is already running.', 'error');
+            sendResponse({ status: 'error', message: 'Automation already in progress.' });
+            return;
+        }
+
+        // Find the active tab in the current window.
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs.length === 0) {
+                return sendResponse({ status: 'error', message: 'No active tab found.' });
+            }
+            const activeTab = tabs[0];
+            activeTabId = activeTab.id;
+
+            // CRITICAL SAFETY CHECK: Verify the tab URL against the allow-listed domain before injecting.
+            chrome.storage.sync.get('options', (data) => {
+                const domain = data.options?.allowListedDomain;
+                if (!domain || !activeTab.url || !activeTab.url.includes(domain)) {
+                    log(`Injection failed. Tab URL "${activeTab.url}" does not match allow-listed domain "${domain}".`, 'error');
+                    return sendResponse({ status: 'error', message: 'Current tab is not on the allow-listed domain.' });
+                }
+
+                log(`Injecting content script into tab ${activeTabId} on domain ${domain}.`, 'info');
+
+                // Inject the content script into the active tab.
+                chrome.scripting.executeScript({
+                    target: { tabId: activeTabId },
+                    files: ['js/content.js']
+                }).then(() => {
+                    log('Initial content script injected successfully.', 'info');
+
+                    // Now that the script is injected, we can start the automation.
+                    automationInProgress = true;
+                    currentConfig = message.config;
+                    chrome.storage.local.set({ automation_in_progress: true });
+                    sendResponse({ status: 'success' });
+
+                    // Initiate Phase 6
+                    executePhase6();
+
+                }).catch(err => {
+                    log(`Failed to inject initial script: ${err.message}`, 'error');
+                    sendResponse({ status: 'error', message: 'Failed to inject script into the page.' });
+                });
+            });
+        });
+        return true; // Indicates async response
+    }
+
+    if (message.action === 'abortAutomation') {
+        if (!automationInProgress) {
+            sendResponse({ status: 'error', message: 'No automation to abort.' });
+            return;
+        }
+        resetState('Automation aborted by user.', 'info');
+        sendResponse({ status: 'success' });
+    }
+
+    // --- Message from Content Script ---
+    // This message is sent after a successful vehicle selection (Phase 8).
+    if (message.action === 'phase9_readyToAccept') {
+        if (!automationInProgress || sender.tab.id !== activeTabId) return; // Safety check
+        executePhase9();
+    }
+});
+
+
+// =================================================================
+// AUTOMATION PHASES
+// =================================================================
+
+function executePhase6() {
+    if (!automationInProgress || !currentConfig.enabledPhases[6]) {
+        return resetState(currentConfig.enabledPhases[6] ? 'State error in P6.' : 'Phase 6 disabled.', 'info');
+    }
+
+    log('Executing Phase 6: Finding and clicking booking...', 'info');
+
+    if (currentConfig.isDryRun) {
+        log('[Dry Run] Would click the booking button.', 'info');
+        // In a dry run, we simulate success to proceed to the next step logic
+        return executePhase8();
+    }
+
+    sendMessageToContentScript(activeTabId, {
+        action: 'phase6_clickBooking',
+        ...currentConfig
+    }, (response) => {
+        if (response && response.status === 'success') {
+            log('Phase 6 successful.', 'success');
+            // Phase 8 will be triggered by the new tab listener.
+        } else {
+            resetState(response ? response.message : 'Phase 6 failed.', 'error');
+        }
+    });
+}
+
+function executePhase8() {
+    if (!automationInProgress || !currentConfig.enabledPhases[8]) {
+        return resetState(currentConfig.enabledPhases[8] ? 'State error in P8.' : 'Phase 8 disabled.', 'info');
+    }
+
+    log('Executing Phase 8: Selecting vehicle...', 'info');
+
+    if (currentConfig.isDryRun) {
+        log(`[Dry Run] Would select vehicle: ${currentConfig.vehicleClass}.`, 'info');
+        return executePhase9(); // Simulate success
+    }
+
+    sendMessageToContentScript(activeTabId, {
+        action: 'phase8_selectVehicle',
+        vehicleClass: currentConfig.vehicleClass
+    }, (response) => {
+        if (!response || response.status !== 'success') {
+            resetState(response ? response.message : 'Phase 8 failed.', 'error');
+        }
+        // Success is handled by the 'phase9_readyToAccept' message listener
+    });
+}
+
+function executePhase9() {
+    if (!automationInProgress || !currentConfig.enabledPhases[9]) {
+        return resetState(currentConfig.enabledPhases[9] ? 'State error in P9.' : 'Phase 9 disabled. Automation complete.', 'success');
+    }
+
+    log('Executing Phase 9: Clicking final confirmation...', 'info');
+
+    if (currentConfig.isDryRun) {
+        log('[Dry Run] Would click the final "Accept" button.', 'info');
+        return resetState('Dry run complete.', 'success');
+    }
+
+    sendMessageToContentScript(activeTabId, { action: 'phase9_acceptRide' }, (response) => {
+        if (response && response.status === 'success') {
+            resetState('Automation complete!', 'success');
+        } else {
+            resetState(response ? response.message : 'Phase 9 failed.', 'error');
+        }
+    });
+}
+
+// =================================================================
+// TAB & NAVIGATION HANDLING
+// =================================================================
+
+// Listener for new tabs, specifically for handling the transition from P6 to P8.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    // We only care about tabs that are fully loaded and match the allow-listed URL pattern.
+    if (changeInfo.status !== 'complete' || !automationInProgress) {
+        return;
+    }
+
+    // Load allow-listed domain from sync storage
+    chrome.storage.sync.get('options', (data) => {
+        const domain = data.options?.allowListedDomain;
+        if (!domain) {
+            // If no domain is set, we cannot proceed safely.
+            if(activeTabId === tabId) resetState('Allow-listed domain not set in options. Aborting.', 'error');
+            return;
+        }
+
+        // Check if the new tab's URL matches the pattern.
+        // This is a critical safety check to ensure we only act on the intended page.
+        const urlPattern = new RegExp(`^https?://${domain.replace('.', '\\.')}/new-ride/.*`);
+        if (tab.url && tab.url.match(urlPattern)) {
+            log(`New ride tab detected (ID: ${tabId}). Updating active tab ID.`, 'info');
+            activeTabId = tabId; // Update the active tab ID to the new tab.
+
+            // Inject the content script into the new tab programmatically
+            chrome.scripting.executeScript({
+                target: { tabId: activeTabId },
+                files: ['js/content.js']
+            }).then(() => {
+                log('Content script injected into new tab.', 'info');
+                // Now that the script is injected, we can proceed with Phase 8.
+                executePhase8();
+            }).catch(err => {
+                 resetState(`Failed to inject script into new tab: ${err.message}`, 'error');
+            });
+        }
+    });
+});
+
+// Clean up state if the tracked tab is closed by the user.
+chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+    if (tabId === activeTabId) {
+        resetState('Tracked tab was closed by user.', 'info');
+    }
+});
+
+
+// =================================================================
+// UTILITY FUNCTIONS
+// =================================================================
+
+/**
+ * Sends a message to a content script in a specific tab and handles the response.
+ * @param {number} tabId The ID of the tab to send the message to.
+ * @param {object} message The message object.
+ * @param {(response: object) => void} callback The callback to handle the response.
+ */
+function sendMessageToContentScript(tabId, message, callback) {
+  chrome.tabs.sendMessage(tabId, message, (response) => {
+    if (chrome.runtime.lastError) {
+      log(`Error sending message to tab ${tabId}: ${chrome.runtime.lastError.message}`, 'error');
+      if (callback) callback({ status: 'error', message: chrome.runtime.lastError.message });
       return;
     }
-    const activeTabId = tabs[0].id;
-
-    chrome.storage.local.get(['date', 'dateTolerance', 'vehicleClass'], (settings) => {
-      if (!settings.date || !settings.vehicleClass) {
-        console.error('Required settings (date, vehicleClass) not found in storage.');
-        sendResponse({ status: 'error', message: 'Missing settings.' });
-        return;
-      }
-
-      // Inject the content script and command it to start the booking process (Phase 6).
-      injectAndSendMessage(activeTabId, 'js/content.js', {
-        action: 'phase6_clickBooking',
-        ...settings
-      }, sendResponse);
-    });
-  });
-}
-
-/**
- * Handles the 'phase9_readyToAccept' message from the content script.
- * It checks if the final click is user-enabled before proceeding.
- * This is a critical safety check.
- */
-function handleReadyToAccept(tabId, sendResponse) {
-  // Security Check: Ensure the message is from the tab we are expecting.
-  if (tabId !== newRideTabId) {
-    console.error(`Received ready message from unexpected tab: ${tabId}. Expected: ${newRideTabId}`);
-    sendResponse({ status: 'error', message: 'Mismatched tab ID' });
-    return;
-  }
-
-  // Check the user's preference for the final click.
-  chrome.storage.local.get(['finalClickEnabled'], (settings) => {
-    if (settings.finalClickEnabled) {
-      console.log('Final click is enabled. Sending acceptRide command.');
-      // Send the final command (Phase 9) to the content script.
-      chrome.tabs.sendMessage(newRideTabId, { action: 'phase9_acceptRide' });
-      sendResponse({ status: 'proceeding' });
-    } else {
-      console.log('Final click is disabled by user setting. Automation will stop here.');
-      sendResponse({ status: 'stopped_by_user_setting' });
-    }
-    // Reset the tracked tab ID as this part of the flow is complete.
-    newRideTabId = null;
-  });
-}
-
-/**
- * Phase 7: New Tab Handling.
- * Listens for tab updates to detect when the new ride booking tab has been opened and is ready.
- * This is crucial for transitioning the automation from the initial page to the confirmation page.
- */
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  // We are interested only when the tab is fully loaded and has a URL matching the booking page.
-  // This prevents injecting the script multiple times or on the wrong pages.
-  if (changeInfo.status === 'complete' && tab.url && tab.url.includes('/new-ride/')) {
-    console.log(`New ride tab detected and loaded: ${tabId}`);
-    newRideTabId = tabId; // Temporarily store the tab ID for this flow.
-
-    chrome.storage.local.get(['vehicleClass'], (settings) => {
-      if (!settings.vehicleClass) {
-        console.error('Vehicle class not found in storage for new ride tab.');
-        return;
-      }
-
-      // Inject the content script into the new tab and command it to select the vehicle (Phase 8).
-      injectAndSendMessage(newRideTabId, 'js/content.js', {
-        action: 'phase8_selectVehicle',
-        vehicleClass: settings.vehicleClass
-      });
-    });
-  }
-});
-
-/**
- * Helper function to inject a script into a tab and then send it a message.
- * This abstracts the two-step process of injection and communication.
- */
-function injectAndSendMessage(tabId, scriptFile, message, callback) {
-  chrome.scripting.executeScript({
-    target: { tabId: tabId },
-    files: [scriptFile]
-  }).then(() => {
-    console.log(`Successfully injected ${scriptFile} into tab ${tabId}.`);
-    chrome.tabs.sendMessage(tabId, message, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error('Error sending message:', chrome.runtime.lastError.message);
-        if (callback) callback({ status: 'error', message: chrome.runtime.lastError.message });
-      } else {
-        console.log('Message sent successfully, response:', response);
-        if (callback) callback({ status: 'success', response });
-      }
-    });
-  }).catch(err => {
-    console.error(`Failed to inject script ${scriptFile} into tab ${tabId}:`, err);
-    if (callback) callback({ status: 'error', message: err.message });
+    if (callback) callback(response);
   });
 }
