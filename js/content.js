@@ -61,7 +61,7 @@ function phase6_clickBooking(targetDateStr, toleranceDays, vehicleClass, sendRes
   // --- Strict Execution Rules ---
   // These rules ensure the automation only proceeds if the page content matches user expectations.
   const dateElement = bookingElement.querySelector('.booking_date'); // Assuming a selector for the date
-  const vehicleElement = bookingElement.querySelector('.booking_vehicle'); // Assuming a selector for the vehicle
+    const vehicleElement = bookingElement.querySelector('.vehicle_class'); // Assuming a selector for the vehicle
 
   if (!dateElement || !vehicleElement) {
       console.error('Date or vehicle information not found within the booking element. Aborting.');
