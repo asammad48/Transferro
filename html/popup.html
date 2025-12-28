@@ -1,0 +1,49 @@
+<!--
+  This is the HTML file for the extension's popup UI.
+  It provides the primary interface for the user to initiate the booking automation.
+  The user enters the required criteria here, and clicking "Proceed" starts the process.
+-->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Booking Automation</title>
+  <style>
+    body { font-family: sans-serif; font-size: 14px; padding: 10px; }
+    .container { width: 300px; }
+    .row { margin-bottom: 10px; }
+    label { display: block; margin-bottom: 5px; }
+    input[type="text"], input[type="number"] { width: 100%; padding: 5px; box-sizing: border-box; }
+    button { width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+    button:hover { background-color: #45a049; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Booking Automation</h2>
+
+    <!-- Input for the target booking date. This is a primary condition for the automation. -->
+    <div class="row">
+      <label for="date">Target Date (YYYY-MM-DD):</label>
+      <input type="text" id="date" placeholder="e.g., 2024-07-28">
+    </div>
+
+    <!-- Input for the date tolerance, allowing for a flexible date range. -->
+    <div class="row">
+        <label for="date-tolerance">Date Tolerance (days, ±):</label>
+        <input type="number" id="date-tolerance" value="0" min="0">
+    </div>
+
+    <!-- Input for the exact vehicle class. This is another primary condition. -->
+    <div class="row">
+      <label for="vehicle-class">Vehicle Class:</label>
+      <input type="text" id="vehicle-class" placeholder="e.g., Sedan">
+    </div>
+
+    <!-- The main action button that the user must click to start the automation. -->
+    <button id="proceed">Proceed</button>
+  </div>
+
+  <!-- Links to the JavaScript file that handles the popup's logic. -->
+  <script src="../js/popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!--
+  This is the HTML file for the extension's options page.
+  It allows the user to configure settings that affect the automation's behavior.
+-->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Booking Automation Options</title>
+  <style>
+    body { font-family: sans-serif; font-size: 14px; padding: 20px; }
+    .container { width: 400px; }
+    .row { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; }
+    input[type="checkbox"] { margin-right: 10px; }
+    button { padding: 10px 15px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+    button:hover { background-color: #45a049; }
+    .status { margin-top: 15px; color: green; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Options</h2>
+
+    <!--
+      This checkbox is a critical user-safety feature.
+      It allows the user to control whether the automation performs the final, irreversible action.
+      By default, this should be disabled, requiring the user to opt-in.
+    -->
+    <div class="row">
+      <label>
+        <input type="checkbox" id="final-click-enabled">
+        Enable Final "Accept Ride" Click
+      </label>
+    </div>
+
+    <!-- The button to save the user's settings. -->
+    <button id="save">Save</button>
+
+    <!-- A status message to provide feedback to the user after saving. -->
+    <div id="status" class="status"></div>
+  </div>
+
+  <!-- Links to the JavaScript file that handles the options page logic. -->
+  <script src="../js/options.js"></script>
+</body>
+</html>

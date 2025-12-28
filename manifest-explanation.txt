@@ -1,0 +1,16 @@
+This file explains the configuration of `manifest.json`.
+
+- `"manifest_version": 3`: Specifies the latest Chrome extension manifest version for enhanced security, performance, and privacy.
+- `"name"`, `"version"`, `"description"`: Standard extension metadata.
+- `"permissions"`: Defines what the extension can do.
+  - `"storage"`: Allows the extension to store user settings (e.g., date, vehicle class, options).
+  - `"activeTab"`: Grants temporary access to the currently active tab when the user interacts with the extension. This is a crucial security feature, as it prevents the extension from accessing any tab in the background.
+  - `"scripting"`: Required to inject the `content.js` script into the webpage.
+  - `"tabs"`: Used by the background script to listen for the creation of new tabs and get their URLs, specifically for handling the booking confirmation page.
+- `"host_permissions"`: A critical security boundary.
+  - `"https://*.allow-listed-website.com/*"`: This is an **allow-list** that restricts the extension to run *only* on the specified domain. It cannot interact with any other website, which is a fundamental safety guarantee.
+- `"background"`:
+  - `"service_worker": "js/background.js"`: Defines the background script that manages the automation logic.
+- `"action"`: Configures the extension's icon and popup UI that appears when the user clicks the extension icon.
+- `"options_ui"`: Provides a dedicated page for configuring the extension's settings.
+- `"icons"`: Defines the icons for the extension.
