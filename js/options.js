@@ -36,11 +36,11 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const loadOptions = () => {
         chrome.storage.sync.get('options', (data) => {
-            if (data.options) {
-                allowListedDomain.value = data.options.allowListedDomain || '';
-                defaultTolerance.value = data.options.defaultTolerance || 0;
-                defaultVehicleClass.value = data.options.defaultVehicleClass || '';
-            }
+            const currentOptions = data.options || {};
+            // Set default domain if it's not already set
+            allowListedDomain.value = currentOptions.allowListedDomain || 'control.transfeero.com';
+            defaultTolerance.value = currentOptions.defaultTolerance || 0;
+            defaultVehicleClass.value = currentOptions.defaultVehicleClass || '';
         });
     };
 
