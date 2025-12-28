@@ -40,6 +40,7 @@ function resetState(reason, level = 'info') {
     if (refreshIntervalId) {
         clearInterval(refreshIntervalId);
         refreshIntervalId = null;
+        log('Auto-refresh stopped.', 'info');
     }
 
     const wasInProgress = automationInProgress; // Capture state before reset
@@ -81,6 +82,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             refreshIntervalId = null;
             log('Cleared previous auto-refresh schedule.', 'info');
         }
+
+        log('Received startAutomation command from popup.', 'info');
 
         if (automationInProgress) {
             log('An automation process is already running.', 'error');
@@ -141,18 +144,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.action === 'abortAutomation') {
-        if (!automationInProgress) {
-            sendResponse({ status: 'error', message: 'No automation to abort.' });
-            return;
+        if (!automationInProgress && !refreshIntervalId) {
+             sendResponse({ status: 'error', message: 'No automation or refresh to abort.' });
+             return;
         }
         resetState('Automation aborted by user.', 'info');
+        log('Automation aborted by user.');
         sendResponse({ status: 'success' });
     }
 
-    // --- Message from Content Script ---
-    // This message is sent after a successful vehicle selection (Phase 8).
+    // --- Messages from Content Script ---
+    if (message.type === 'content_script_log') {
+        // Just forward the log to the popup.
+        log(message.text, message.level);
+    }
+
     if (message.action === 'phase9_readyToAccept') {
-        if (!automationInProgress || sender.tab.id !== activeTabId) return; // Safety check
+        if (!automationInProgress || sender.tab.id !== activeTabId) return;
         executePhase9();
     }
 });
