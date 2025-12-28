@@ -2,19 +2,12 @@
   "manifest_version": 3,
   "name": "Booking Automation",
   "version": "1.0",
-  "description": "Performs rule-based booking automation on a specific website.",
+  "description": "A user-controlled extension to assist with booking automation.",
   "permissions": [
     "storage",
-    "activeTab",
     "scripting",
     "tabs"
   ],
-  "host_permissions": [
-    "https://*.allow-listed-website.com/*"
-  ],
-  "background": {
-    "service_worker": "js/background.js"
-  },
   "action": {
     "default_popup": "html/popup.html",
     "default_icon": {
@@ -23,10 +16,10 @@
       "128": "icons/icon128.png"
     }
   },
-  "options_ui": {
-    "page": "html/options.html",
-    "open_in_tab": true
+  "background": {
+    "service_worker": "js/background.js"
   },
+  "options_page": "html/options.html",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

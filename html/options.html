@@ -1,46 +1,44 @@
-<!--
-  This is the HTML file for the extension's options page.
-  It allows the user to configure settings that affect the automation's behavior.
--->
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Booking Automation Options</title>
-  <style>
-    body { font-family: sans-serif; font-size: 14px; padding: 20px; }
-    .container { width: 400px; }
-    .row { margin-bottom: 15px; }
-    label { display: block; margin-bottom: 5px; font-weight: bold; }
-    input[type="checkbox"] { margin-right: 10px; }
-    button { padding: 10px 15px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
-    button:hover { background-color: #45a049; }
-    .status { margin-top: 15px; color: green; font-weight: bold; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automation Options</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; width: 400px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="number"] { width: 100%; padding: 8px; box-sizing: border-box; }
+        .buttons { margin-top: 20px; }
+        button { padding: 10px 15px; margin-right: 10px; }
+        #status { margin-top: 15px; font-style: italic; color: green; }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h2>Options</h2>
+    <h1>Automation Settings</h1>
 
-    <!--
-      This checkbox is a critical user-safety feature.
-      It allows the user to control whether the automation performs the final, irreversible action.
-      By default, this should be disabled, requiring the user to opt-in.
-    -->
-    <div class="row">
-      <label>
-        <input type="checkbox" id="final-click-enabled">
-        Enable Final "Accept Ride" Click
-      </label>
+    <div class="form-group">
+        <label for="allow-listed-domain">Allow-Listed Domain:</label>
+        <input type="text" id="allow-listed-domain" placeholder="e.g., example.com">
     </div>
 
-    <!-- The button to save the user's settings. -->
-    <button id="save">Save</button>
+    <div class="form-group">
+        <label for="default-tolerance">Default Date Tolerance (days):</label>
+        <input type="number" id="default-tolerance" min="0" value="0">
+    </div>
 
-    <!-- A status message to provide feedback to the user after saving. -->
-    <div id="status" class="status"></div>
-  </div>
+    <div class="form-group">
+        <label for="default-vehicle-class">Default Vehicle Class:</label>
+        <input type="text" id="default-vehicle-class" placeholder="e.g., Sedan">
+    </div>
 
-  <!-- Links to the JavaScript file that handles the options page logic. -->
-  <script src="../js/options.js"></script>
+    <div class="buttons">
+        <button id="save-button">Save</button>
+        <button id="reset-button">Reset</button>
+    </div>
+
+    <div id="status"></div>
+
+    <script src="../js/options.js"></script>
 </body>
 </html>

@@ -1,38 +1,71 @@
 /**
- * @fileoverview This script handles the logic for the options page (options.html).
- * It allows the user to configure persistent settings for the extension,
- * such as enabling or disabling the final confirmation click.
+ * @fileoverview Logic for the extension's options page (options.html).
+ * Handles saving and loading of persistent settings.
  */
 
-// Phase 3: Options UI Logic
 document.addEventListener('DOMContentLoaded', () => {
-  const finalClickCheckbox = document.getElementById('final-click-enabled');
-  const saveButton = document.getElementById('save');
-  const statusDiv = document.getElementById('status');
+    // --- Element References ---
+    const allowListedDomain = document.getElementById('allow-listed-domain');
+    const defaultTolerance = document.getElementById('default-tolerance');
+    const defaultVehicleClass = document.getElementById('default-vehicle-class');
+    const saveButton = document.getElementById('save-button');
+    const resetButton = document.getElementById('reset-button');
+    const statusDiv = document.getElementById('status');
 
-  /**
-   * Load the saved state of the 'finalClickEnabled' setting when the options page is opened.
-   * The `!!` operator converts the stored value (which could be undefined) to a boolean.
-   * This ensures the checkbox accurately reflects the current setting.
-   */
-  chrome.storage.local.get(['finalClickEnabled'], (result) => {
-    finalClickCheckbox.checked = !!result.finalClickEnabled;
-  });
+    /**
+     * Saves the options to chrome.storage.sync.
+     */
+    const saveOptions = () => {
+        const options = {
+            allowListedDomain: allowListedDomain.value.trim(),
+            defaultTolerance: parseInt(defaultTolerance.value, 10),
+            defaultVehicleClass: defaultVehicleClass.value.trim()
+        };
 
-  /**
-   * When the user clicks the "Save" button, store the current state of the checkbox
-   * in chrome.storage.local. This makes the setting available to other parts of the extension,
-   * particularly the background script, which will check this value before performing the final click.
-   */
-  saveButton.addEventListener('click', () => {
-    const finalClickEnabled = finalClickCheckbox.checked;
-    chrome.storage.local.set({ finalClickEnabled }, () => {
-      // Provide visual feedback to the user that the settings have been saved.
-      statusDiv.textContent = 'Options saved.';
-      // The message disappears after 2 seconds.
-      setTimeout(() => {
-        statusDiv.textContent = '';
-      }, 2000);
-    });
-  });
+        // Use chrome.storage.sync to allow settings to persist across devices.
+        chrome.storage.sync.set({ options }, () => {
+            statusDiv.textContent = 'Options saved.';
+            setTimeout(() => {
+                statusDiv.textContent = '';
+            }, 1500);
+        });
+    };
+
+    /**
+     * Loads the options from chrome.storage.sync and populates the form.
+     */
+    const loadOptions = () => {
+        chrome.storage.sync.get('options', (data) => {
+            if (data.options) {
+                allowListedDomain.value = data.options.allowListedDomain || '';
+                defaultTolerance.value = data.options.defaultTolerance || 0;
+                defaultVehicleClass.value = data.options.defaultVehicleClass || '';
+            }
+        });
+    };
+
+    /**
+     * Resets the options to their default values.
+     */
+    const resetOptions = () => {
+        // Clear the specific 'options' key from storage
+        chrome.storage.sync.remove('options', () => {
+            // After removing, reload the UI which will now be empty or have default values
+            allowListedDomain.value = '';
+            defaultTolerance.value = 0;
+            defaultVehicleClass.value = '';
+            statusDiv.textContent = 'Options reset to default.';
+            setTimeout(() => {
+                statusDiv.textContent = '';
+            }, 1500);
+        });
+    };
+
+
+    // --- Event Listeners ---
+    saveButton.addEventListener('click', saveOptions);
+    resetButton.addEventListener('click', resetOptions);
+
+    // --- Initialization ---
+    loadOptions();
 });

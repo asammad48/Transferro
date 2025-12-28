@@ -1,49 +1,82 @@
-<!--
-  This is the HTML file for the extension's popup UI.
-  It provides the primary interface for the user to initiate the booking automation.
-  The user enters the required criteria here, and clicking "Proceed" starts the process.
--->
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Booking Automation</title>
-  <style>
-    body { font-family: sans-serif; font-size: 14px; padding: 10px; }
-    .container { width: 300px; }
-    .row { margin-bottom: 10px; }
-    label { display: block; margin-bottom: 5px; }
-    input[type="text"], input[type="number"] { width: 100%; padding: 5px; box-sizing: border-box; }
-    button { width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
-    button:hover { background-color: #45a049; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Booking Automation</title>
+    <style>
+        body { font-family: sans-serif; font-size: 14px; margin: 10px; min-width: 350px; }
+        .row { display: flex; align-items: center; margin-bottom: 8px; }
+        .row label { flex-basis: 150px; }
+        .row input[type="text"], .row input[type="date"], .row input[type="number"] { flex-grow: 1; }
+        .toggle-switch { position: relative; display: inline-block; width: 40px; height: 20px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
+        .slider:before { position: absolute; content: ""; height: 12px; width: 12px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #2196F3; }
+        input:checked + .slider:before { transform: translateX(20px); }
+        #log-panel { border: 1px solid #ccc; height: 150px; overflow-y: scroll; padding: 5px; background-color: #f9f9f9; margin-top: 10px; font-family: monospace; font-size: 12px; }
+        .buttons { margin-top: 10px; display: flex; justify-content: space-between; }
+        button { padding: 8px 15px; }
+        #abort-button { background-color: #f44336; color: white; }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h2>Booking Automation</h2>
+    <h3>Booking Automation Control</h3>
 
-    <!-- Input for the target booking date. This is a primary condition for the automation. -->
     <div class="row">
-      <label for="date">Target Date (YYYY-MM-DD):</label>
-      <input type="text" id="date" placeholder="e.g., 2024-07-28">
+        <label for="booking-date">Target Date:</label>
+        <input type="date" id="booking-date">
+    </div>
+    <div class="row">
+        <label for="date-tolerance">Date Tolerance (± days):</label>
+        <input type="number" id="date-tolerance" min="0" value="0">
+    </div>
+    <div class="row">
+        <label for="vehicle-class">Vehicle Class (Exact):</label>
+        <input type="text" id="vehicle-class" placeholder="e.g., Sedan, SUV">
     </div>
 
-    <!-- Input for the date tolerance, allowing for a flexible date range. -->
+    <hr>
+
     <div class="row">
-        <label for="date-tolerance">Date Tolerance (days, ±):</label>
-        <input type="number" id="date-tolerance" value="0" min="0">
+        <label>Dry Run (Log actions only):</label>
+        <label class="toggle-switch">
+            <input type="checkbox" id="dry-run-toggle" checked>
+            <span class="slider"></span>
+        </label>
+    </div>
+    <div class="row">
+        <label>Enable Booking Click (P6):</label>
+        <label class="toggle-switch">
+            <input type="checkbox" id="enable-phase6-toggle">
+            <span class="slider"></span>
+        </label>
+    </div>
+    <div class="row">
+        <label>Enable Vehicle Select (P8):</label>
+        <label class="toggle-switch">
+            <input type="checkbox" id="enable-phase8-toggle">
+            <span class="slider"></span>
+        </label>
+    </div>
+    <div class="row">
+        <label>Enable Final Click (P9):</label>
+        <label class="toggle-switch">
+            <input type="checkbox" id="enable-phase9-toggle">
+            <span class="slider"></span>
+        </label>
     </div>
 
-    <!-- Input for the exact vehicle class. This is another primary condition. -->
-    <div class="row">
-      <label for="vehicle-class">Vehicle Class:</label>
-      <input type="text" id="vehicle-class" placeholder="e.g., Sedan">
+    <div class="buttons">
+        <button id="proceed-button">Proceed</button>
+        <button id="abort-button">Abort</button>
     </div>
 
-    <!-- The main action button that the user must click to start the automation. -->
-    <button id="proceed">Proceed</button>
-  </div>
+    <div id="log-panel">
+        <div>Welcome! Set parameters and click "Proceed".</div>
+    </div>
 
-  <!-- Links to the JavaScript file that handles the popup's logic. -->
-  <script src="../js/popup.js"></script>
+    <script src="../js/popup.js"></script>
 </body>
 </html>
