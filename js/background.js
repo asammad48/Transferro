@@ -70,7 +70,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // CRITICAL SAFETY CHECK: Verify the tab URL against the allow-listed domain before injecting.
             chrome.storage.sync.get('options', (data) => {
                 const domain = data.options?.allowListedDomain;
-                if (!domain || !activeTab.url || !activeTab.url.includes(domain)) {
+
+                // 1. Check if the domain is configured at all.
+                if (!domain) {
+                    const errorMessage = 'Allow-listed domain not set. Please right-click the extension icon, go to Options, and set it.';
+                    log(errorMessage, 'error');
+                    return sendResponse({ status: 'error', message: errorMessage });
+                }
+
+                // 2. Check if the current tab's URL matches the configured domain.
+                if (!activeTab.url || !activeTab.url.includes(domain)) {
                     log(`Injection failed. Tab URL "${activeTab.url}" does not match allow-listed domain "${domain}".`, 'error');
                     return sendResponse({ status: 'error', message: 'Current tab is not on the allow-listed domain.' });
                 }
