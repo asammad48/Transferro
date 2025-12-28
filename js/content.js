@@ -47,50 +47,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // PHASE 6 — CLICK BOOKING
 // ========================
 function phase6_clickBooking(targetDateStr, toleranceDays, vehicleClass, sendResponse) {
-  // Target selector from the requirements.
-  const bookingElement = document.querySelector('div.row.the_booking');
+// Target selector from the requirements.
+const bookingElements = document.querySelectorAll('div.row.the_booking');
 
-  // --- Preconditions ---
-  // The element must exist and be visible before any action is taken.
-  if (!bookingElement || !isElementVisible(bookingElement)) {
-    console.error('Booking element not found or not visible. Aborting.');
-    sendResponse({ status: 'error', message: 'Booking element not found or not visible.' });
-    return;
+// --- Preconditions ---
+if (bookingElements.length === 0) {
+  console.error('No booking elements found. Aborting.');
+  sendResponse({ status: 'error', message: 'No booking elements found.' });
+  return;
+}
+
+let matchFound = false;
+
+// Iterate through all found booking elements.
+for (const bookingElement of bookingElements) {
+  if (!isElementVisible(bookingElement)) {
+    continue; // Skip non-visible elements.
   }
 
   // --- Strict Execution Rules ---
-  // These rules ensure the automation only proceeds if the page content matches user expectations.
-  const dateElement = bookingElement.querySelector('.booking_date'); // Assuming a selector for the date
-    const vehicleElement = bookingElement.querySelector('.vehicle_class'); // Assuming a selector for the vehicle
+  const dateElement = bookingElement.querySelector('.booking_date');
+  const vehicleElement = bookingElement.querySelector('.vehicle_class');
 
   if (!dateElement || !vehicleElement) {
-      console.error('Date or vehicle information not found within the booking element. Aborting.');
-      sendResponse({ status: 'error', message: 'Missing date or vehicle info.' });
-      return;
+    continue; // Skip elements missing crucial info.
   }
 
   const actualDateStr = dateElement.textContent.trim();
   const actualVehicle = vehicleElement.textContent.trim().toLowerCase();
 
   // Rule 1: Date must match within the user-defined tolerance.
-  if (!isDateMatch(actualDateStr, targetDateStr, toleranceDays)) {
-    console.error(`Date mismatch. Expected: ${targetDateStr} (±${toleranceDays}), Found: ${actualDateStr}. Aborting.`);
-    sendResponse({ status: 'error', message: 'Date mismatch.' });
-    return;
-  }
-
+  const dateMatch = isDateMatch(actualDateStr, targetDateStr, toleranceDays);
   // Rule 2: Vehicle class must match exactly (case-normalized).
-  if (actualVehicle !== vehicleClass.toLowerCase()) {
-    console.error(`Vehicle mismatch. Expected: ${vehicleClass.toLowerCase()}, Found: ${actualVehicle}. Aborting.`);
-    sendResponse({ status: 'error', message: 'Vehicle class mismatch.' });
-    return;
-  }
+  const vehicleMatch = actualVehicle === vehicleClass.toLowerCase();
 
-  // --- Action ---
-  // Only if all checks pass, the script performs a single click.
-  console.log('All preconditions met for Phase 6. Clicking booking element.');
-  bookingElement.click();
-  sendResponse({ status: 'success', message: 'Booking element clicked.' });
+  // If both rules pass, perform the action and stop.
+  if (dateMatch && vehicleMatch) {
+    console.log('All preconditions met for Phase 6. Clicking the first valid booking element.');
+    bookingElement.click();
+    sendResponse({ status: 'success', message: 'Booking element clicked.' });
+    matchFound = true;
+    break; // Exit the loop after finding and clicking the first match.
+  }
+}
+
+// If the loop completes without finding a match, send a failure response.
+if (!matchFound) {
+  console.error('No booking element met the required date and vehicle criteria. Aborting.');
+  sendResponse({ status: 'error', message: 'No matching booking found.' });
+}
 }
 
 
