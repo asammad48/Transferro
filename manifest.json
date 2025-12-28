@@ -8,6 +8,9 @@
     "scripting",
     "tabs"
   ],
+  "host_permissions": [
+    "https://control.transfeero.com/*"
+  ],
   "action": {
     "default_popup": "html/popup.html",
     "default_icon": {
