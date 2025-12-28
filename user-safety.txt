@@ -1,0 +1,39 @@
+This document outlines the key safety features of the Booking Automation Chrome Extension, ensuring that the automation is predictable, controllable, and secure for the user.
+
+## 1. User-Initiated Actions
+
+The automation process is **never** automatic. It only begins when the user explicitly clicks the "Proceed" button in the extension's popup. This is the cornerstone of the extension's safety model, ensuring the user is always in control.
+
+- **No Background Scanning:** The extension does not scan or monitor websites in the background. It only becomes active on the current page after a direct user command.
+- **`activeTab` Permission:** The extension uses the `activeTab` permission instead of a broad host permission for its initial action. This means it only gets temporary access to the site the user is currently viewing when they click the extension, which is a best practice for minimizing permissions.
+
+## 2. Strict, Rule-Based Execution
+
+The automation will **immediately stop** if any of its strict rules are not met. This prevents the extension from performing unintended actions on incorrect pages or with incorrect data.
+
+- **Date Matching:** The automation will only proceed if the date on the booking page matches the user's specified date, within a user-defined tolerance.
+- **Exact Vehicle Match:** The vehicle class on the page must be an exact, case-normalized match to the user's input. There is no fuzzy matching, which prevents the selection of a wrong vehicle type.
+- **Selector Specificity:** The extension uses a pre-defined, explicit allow-list of selectors and XPaths. It does not scan the `document.body` or use wildcard selectors, which significantly reduces the risk of clicking the wrong element if the website's layout changes.
+
+## 3. Minimized Permissions and Scope
+
+The extension is built on the principle of least privilege, requesting only the permissions necessary for its functionality.
+
+- **Host Permissions:** The `host_permissions` in `manifest.json` are restricted to a specific, allow-listed website (`https://*.allow-listed-website.com/*`). The extension cannot interact with any other website, protecting the user's data and privacy on other domains.
+- **DOM Safety:** The extension adheres to strict DOM safety rules. It does not use `innerHTML` for writing to the page and relies on safer alternatives like `textContent` and `createElement` if needed, protecting against potential injection attacks.
+
+## 4. User Control Over Final Actions
+
+The most critical and potentially irreversible actions are placed under the user's direct control.
+
+- **Opt-In Final Click:** The final "Accept Ride" click is disabled by default. The user must go into the extension's options page and explicitly enable this feature. This prevents accidental bookings and ensures the user is fully aware of the final action.
+- **Single Click, No Retries:** The extension performs only a single click on the target elements. It does not loop or retry clicks, which prevents unintended consequences like multiple bookings.
+
+## 5. Secure and Isolated Architecture
+
+The extension's architecture separates responsibilities to enhance security and predictability.
+
+- **Isolated Scripts:** The `content.js` script, which interacts with the webpage's DOM, is completely isolated and dormant until it receives a specific command from the `background.js` script. This prevents any unsolicited actions.
+- **State Management:** Critical state, like the `tabId` for the new booking page, is managed carefully in the background script and is not exposed to the content script, preventing potential manipulation.
+
+By combining these principles, the extension ensures that the automation is a safe and reliable tool that operates strictly within the boundaries set by the user.
