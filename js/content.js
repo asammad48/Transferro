@@ -149,7 +149,7 @@ function phase8_selectVehicle(vehicleClass, sendResponse) {
 }
 
 
-// =-======================
+// ========================
 // PHASE 9 — ACCEPT RIDE
 // ========================
 function phase9_acceptRide(sendResponse) {
