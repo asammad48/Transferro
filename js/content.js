@@ -144,10 +144,13 @@ function phase8_selectVehicle(vehicleClasses, sendResponse) {
 
     // Stage 1: Wait for the dropdown container to be visible
     waitForElement(DROPDOWN_CONTAINER_XPATH, 10000).then(dropdownContainer => {
-        logToPopup('Vehicle dropdown container is visible. Clicking its parent.', 'success');
-        const dropdownOpener = dropdownContainer.parentElement;
-        dropdownOpener.click();
-        logToPopup('Vehicle dropdown parent clicked. Now waiting for options to appear.');
+        logToPopup('Vehicle dropdown container is visible. Opening it via script.', 'success');
+
+        const script = document.createElement('script');
+        script.textContent = `$('#vehicle').select2('open');`;
+        document.head.appendChild(script);
+
+        logToPopup('Injected script to open dropdown. Now waiting for options to appear.');
 
         // Stage 2: Wait for the dropdown options to appear
         waitForElement(DROPDOWN_OPTIONS_XPATH, 5000).then(firstOption => {
@@ -158,13 +161,21 @@ function phase8_selectVehicle(vehicleClasses, sendResponse) {
             const lowercasedVehicleClasses = vehicleClasses.map(vc => vc.toLowerCase());
 
             for (const option of options) {
-                const optionText = option.textContent.trim().toLowerCase();
-                logToPopup(`Checking option: "${option.textContent.trim()}".`);
-                if (lowercasedVehicleClasses.includes(optionText)) {
-                    logToPopup(`Matching vehicle found: "${option.textContent}". Clicking.`, 'success');
-                    option.click();
-                    matchFound = true;
-                    break;
+                const optionText = option.textContent.trim();
+                const optionTextLower = optionText.toLowerCase();
+                const isDisabled = option.classList.contains('select2-results__option--disabled');
+
+                logToPopup(`Checking option: "${optionText}" (Enabled: ${!isDisabled}).`);
+
+                if (lowercasedVehicleClasses.includes(optionTextLower)) {
+                    if (isDisabled) {
+                        logToPopup(`Match found for "${optionText}", but it is DISABLED. Skipping.`, 'error');
+                    } else {
+                        logToPopup(`Match found for "${optionText}" and it is ENABLED. Clicking.`, 'success');
+                        option.click();
+                        matchFound = true;
+                        break;
+                    }
                 }
             }
 
