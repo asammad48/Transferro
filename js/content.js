@@ -139,64 +139,50 @@ function phase6_clickBooking(startDateStr, endDateStr, vehicleClasses, sendRespo
  * It uses a polling mechanism to wait for the dropdown to become visible before interacting with it.
  */
 function phase8_selectVehicle(vehicleClasses, sendResponse) {
-    const maxAttempts = 50; // 50 * 200ms = 10 seconds
-    let attempts = 0;
+    const DROPDOWN_CONTAINER_XPATH = '//*[@id="select2-vehicle-container"]';
+    const DROPDOWN_OPTIONS_XPATH = '//*[@id="select2-vehicle-results"]/li';
 
-    logToPopup('Phase 8: Waiting for vehicle dropdown to become visible...');
+    // Stage 1: Wait for the dropdown container to be visible
+    waitForElement(DROPDOWN_CONTAINER_XPATH, 10000).then(dropdown => {
+        logToPopup('Vehicle dropdown container is visible. Clicking it.', 'success');
+        dropdown.click();
+        logToPopup('Vehicle dropdown container clicked. Now waiting for options to appear.');
 
-    const intervalId = setInterval(() => {
-        attempts++;
-        const dropdown = getElementByXPath('//*[@id="select2-vehicle-container"]');
+        // Stage 2: Wait for the dropdown options to appear
+        waitForElement(DROPDOWN_OPTIONS_XPATH, 5000).then(firstOption => {
+            const options = getElementsByXPath(DROPDOWN_OPTIONS_XPATH);
+            logToPopup(`Found ${options.length} vehicle options in dropdown.`);
 
-        if (dropdown && isElementVisible(dropdown)) {
-            // --- Element is found and visible ---
-            clearInterval(intervalId);
-            logToPopup('Vehicle dropdown is visible. Proceeding to click.', 'success');
+            let matchFound = false;
+            const lowercasedVehicleClasses = vehicleClasses.map(vc => vc.toLowerCase());
 
-            try {
-                dropdown.click();
-                logToPopup('Vehicle dropdown clicked.');
-
-                // Short delay for the options to render after click
-                setTimeout(() => {
-                    const options = getElementsByXPath('//*[@id="select2-vehicle-results"]/li');
-                    logToPopup(`Found ${options.length} vehicle options in dropdown.`);
-                    let matchFound = false;
-                    const lowercasedVehicleClasses = vehicleClasses.map(vc => vc.toLowerCase());
-
-                    for (const option of options) {
-                        const optionText = option.textContent.trim().toLowerCase();
-                        logToPopup(`Checking option: "${option.textContent.trim()}".`);
-                        if (lowercasedVehicleClasses.includes(optionText)) {
-                            logToPopup(`Matching vehicle found: "${option.textContent}". Clicking.`, 'success');
-                            option.click();
-                            matchFound = true;
-                            break;
-                        }
-                    }
-
-                    if (matchFound) {
-                        logToPopup('Vehicle selected. Notifying background to proceed.');
-                        chrome.runtime.sendMessage({ action: 'phase9_readyToAccept' });
-                        sendResponse({ status: 'success', message: 'Vehicle selected.' });
-                    } else {
-                        const desiredVehicles = vehicleClasses.join('", "');
-                        throw new Error(`No match found for any of the desired vehicle classes ("${desiredVehicles}"). Aborting.`);
-                    }
-                }, 500);
-
-            } catch (error) {
-                logToPopup(`Error in Phase 8 after finding dropdown: ${error.message}`, 'error');
-                sendResponse({ status: 'error', message: error.message });
+            for (const option of options) {
+                const optionText = option.textContent.trim().toLowerCase();
+                logToPopup(`Checking option: "${option.textContent.trim()}".`);
+                if (lowercasedVehicleClasses.includes(optionText)) {
+                    logToPopup(`Matching vehicle found: "${option.textContent}". Clicking.`, 'success');
+                    option.click();
+                    matchFound = true;
+                    break;
+                }
             }
 
-        } else if (attempts >= maxAttempts) {
-            // --- Timeout ---
-            clearInterval(intervalId);
-            logToPopup('Vehicle dropdown did not become visible within 10 seconds.', 'error');
-            sendResponse({ status: 'error', message: 'Vehicle dropdown did not become visible in time.' });
-        }
-    }, 200);
+            if (matchFound) {
+                logToPopup('Vehicle selected. Notifying background to proceed.');
+                chrome.runtime.sendMessage({ action: 'phase9_readyToAccept' });
+                sendResponse({ status: 'success', message: 'Vehicle selected.' });
+            } else {
+                const desiredVehicles = vehicleClasses.join('", "');
+                throw new Error(`No match found for any desired vehicle classes ("${desiredVehicles}").`);
+            }
+        }).catch(error => {
+            logToPopup('Dropdown options did not appear within 5 seconds.', 'error');
+            sendResponse({ status: 'error', message: 'Dropdown options did not appear.' });
+        });
+    }).catch(error => {
+        logToPopup('Vehicle dropdown container did not become visible within 10 seconds.', 'error');
+        sendResponse({ status: 'error', message: 'Vehicle dropdown container not found.' });
+    });
 }
 
 
@@ -238,6 +224,33 @@ function phase9_acceptRide(sendResponse) {
 // ========================
 // DOM SAFETY & HELPER FUNCTIONS
 // ========================
+
+/**
+ * Polls the DOM for an element to appear and be visible.
+ * @param {string} xpath The XPath selector for the element.
+ * @param {number} timeout The maximum time to wait in milliseconds.
+ * @returns {Promise<Element>} A promise that resolves with the element or rejects on timeout.
+ */
+function waitForElement(xpath, timeout) {
+    return new Promise((resolve, reject) => {
+        const intervalTime = 200;
+        const maxAttempts = timeout / intervalTime;
+        let attempts = 0;
+
+        const intervalId = setInterval(() => {
+            attempts++;
+            const element = getElementByXPath(xpath);
+
+            if (element && isElementVisible(element)) {
+                clearInterval(intervalId);
+                resolve(element);
+            } else if (attempts >= maxAttempts) {
+                clearInterval(intervalId);
+                reject(new Error(`Element with XPath "${xpath}" not found within ${timeout}ms.`));
+            }
+        }, intervalTime);
+    });
+}
 
 function isElementVisible(el) {
   return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
