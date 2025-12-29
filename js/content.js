@@ -136,55 +136,67 @@ function phase6_clickBooking(startDateStr, endDateStr, vehicleClasses, sendRespo
 
 /**
  * Selects the specified vehicle from a dropdown on the new ride page.
- * It uses XPath to locate the dropdown and its options, ensuring precise selection.
- * Delays are used to wait for the UI to render after the page loads and the dropdown opens.
+ * It uses a polling mechanism to wait for the dropdown to become visible before interacting with it.
  */
 function phase8_selectVehicle(vehicleClasses, sendResponse) {
-    setTimeout(() => {
-        try {
-            logToPopup('Attempting to find and open vehicle dropdown with ID "select2-vehicle-container".');
-            const dropdown = getElementByXPath('//*[@id="select2-vehicle-container"]');
-            if (!dropdown || !isElementVisible(dropdown)) {
-                logToPopup('Vehicle dropdown not found or not visible.', 'error');
-                throw new Error('Vehicle dropdown not found or not visible.');
-            }
-            dropdown.click();
-            logToPopup('Vehicle dropdown clicked.');
+    const maxAttempts = 50; // 50 * 200ms = 10 seconds
+    let attempts = 0;
 
-            setTimeout(() => {
-                const options = getElementsByXPath('//*[@id="select2-vehicle-results"]/li');
-                logToPopup(`Found ${options.length} vehicle options in dropdown.`);
-                let matchFound = false;
-                const lowercasedVehicleClasses = vehicleClasses.map(vc => vc.toLowerCase());
+    logToPopup('Phase 8: Waiting for vehicle dropdown to become visible...');
 
-                for (const option of options) {
-                    const optionText = option.textContent.trim().toLowerCase();
-                    logToPopup(`Checking option: "${option.textContent.trim()}".`);
-                    if (lowercasedVehicleClasses.includes(optionText)) {
-                        logToPopup(`Matching vehicle found: "${option.textContent}". Clicking.`, 'success');
-                        option.click();
-                        matchFound = true;
-                        break; // Click the first one that matches the user's list
+    const intervalId = setInterval(() => {
+        attempts++;
+        const dropdown = getElementByXPath('//*[@id="select2-vehicle-container"]');
+
+        if (dropdown && isElementVisible(dropdown)) {
+            // --- Element is found and visible ---
+            clearInterval(intervalId);
+            logToPopup('Vehicle dropdown is visible. Proceeding to click.', 'success');
+
+            try {
+                dropdown.click();
+                logToPopup('Vehicle dropdown clicked.');
+
+                // Short delay for the options to render after click
+                setTimeout(() => {
+                    const options = getElementsByXPath('//*[@id="select2-vehicle-results"]/li');
+                    logToPopup(`Found ${options.length} vehicle options in dropdown.`);
+                    let matchFound = false;
+                    const lowercasedVehicleClasses = vehicleClasses.map(vc => vc.toLowerCase());
+
+                    for (const option of options) {
+                        const optionText = option.textContent.trim().toLowerCase();
+                        logToPopup(`Checking option: "${option.textContent.trim()}".`);
+                        if (lowercasedVehicleClasses.includes(optionText)) {
+                            logToPopup(`Matching vehicle found: "${option.textContent}". Clicking.`, 'success');
+                            option.click();
+                            matchFound = true;
+                            break;
+                        }
                     }
-                }
 
-                if (matchFound) {
-                    chrome.runtime.sendMessage({ action: 'phase9_readyToAccept' }, (response) => {
+                    if (matchFound) {
                         logToPopup('Vehicle selected. Notifying background to proceed.');
+                        chrome.runtime.sendMessage({ action: 'phase9_readyToAccept' });
                         sendResponse({ status: 'success', message: 'Vehicle selected.' });
-                    });
-                } else {
-                    const desiredVehicles = vehicleClasses.join('", "');
-                    logToPopup(`No match found for any of the desired vehicle classes ("${desiredVehicles}").`, 'error');
-                    throw new Error(`No match found for desired vehicle classes. Aborting.`);
-                }
-            }, 500);
+                    } else {
+                        const desiredVehicles = vehicleClasses.join('", "');
+                        throw new Error(`No match found for any of the desired vehicle classes ("${desiredVehicles}"). Aborting.`);
+                    }
+                }, 500);
 
-        } catch (error) {
-            logToPopup(`Error in Phase 8: ${error.message}`, 'error');
-            sendResponse({ status: 'error', message: error.message });
+            } catch (error) {
+                logToPopup(`Error in Phase 8 after finding dropdown: ${error.message}`, 'error');
+                sendResponse({ status: 'error', message: error.message });
+            }
+
+        } else if (attempts >= maxAttempts) {
+            // --- Timeout ---
+            clearInterval(intervalId);
+            logToPopup('Vehicle dropdown did not become visible within 10 seconds.', 'error');
+            sendResponse({ status: 'error', message: 'Vehicle dropdown did not become visible in time.' });
         }
-    }, 1000);
+    }, 200);
 }
 
 
