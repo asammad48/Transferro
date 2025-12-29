@@ -104,6 +104,7 @@ function phase6_clickBooking(targetDateStr, toleranceDays, vehicleClass, sendRes
         if (dateMatch && vehicleMatch) {
             logToPopup(`${logPrefix} Match found! Clicking element.`, 'success');
             bookingElement.click();
+            logToPopup(`${logPrefix} Match found! Button Clicked.`, 'success');
             sendResponse({ status: 'success', message: 'Booking element clicked.' });
             matchFound = true;
             break;
