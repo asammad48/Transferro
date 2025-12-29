@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const autoRefreshToggle = document.getElementById('auto-refresh-toggle');
     const proceedButton = document.getElementById('proceed-button');
     const abortButton = document.getElementById('abort-button');
+    const clearLogButton = document.getElementById('clear-log-button');
     const logPanel = document.getElementById('log-panel');
 
     const ALL_INPUTS = [startDate, endDate, vehicleClass, autoRefreshToggle];
@@ -19,13 +20,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /**
      * Logs a message to the popup's log panel.
-     * @param {string} message The message to display.
-     * @param {string} [level='info'] The log level ('info', 'error', 'success').
+     * @param {string} text The message to display.
+     * @param {string} level The log level ('info', 'error', 'success').
+     * @param {string} timestamp The timestamp of the log.
      */
-    const logMessage = (message, level = 'info') => {
+    const logMessage = (text, level, timestamp) => {
         const logEntry = document.createElement('div');
-        const timestamp = new Date().toLocaleTimeString();
-        logEntry.textContent = `[${timestamp}] ${message}`;
+        logEntry.textContent = `[${timestamp}] ${text}`;
         logEntry.style.color = level === 'error' ? '#f44336' : (level === 'success' ? '#4CAF50' : 'black');
         logPanel.appendChild(logEntry);
         logPanel.scrollTop = logPanel.scrollHeight; // Auto-scroll to bottom
@@ -67,7 +68,18 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.local.get('automation_in_progress', (data) => {
             if (data.automation_in_progress) {
                 proceedButton.disabled = true;
-                logMessage('Automation is currently in progress.');
+            }
+        });
+    };
+
+    /**
+     * Loads the entire log history from storage and displays it.
+     */
+    const loadLogHistory = () => {
+        logPanel.innerHTML = ''; // Clear existing logs
+        chrome.storage.local.get({ logHistory: [] }, (data) => {
+            for (const entry of data.logHistory) {
+                logMessage(entry.text, entry.level, entry.timestamp);
             }
         });
     };
@@ -83,12 +95,12 @@ document.addEventListener('DOMContentLoaded', () => {
     proceedButton.addEventListener('click', () => {
         // Basic validation
         if (!startDate.value) {
-            logMessage('Error: Start Date is required.', 'error');
+            logMessage('Error: Start Date is required.', 'error', new Date().toLocaleTimeString());
             return;
         }
         const selectedVehicles = Array.from(vehicleClass.selectedOptions).map(option => option.value);
         if (selectedVehicles.length === 0) {
-            logMessage('Error: At least one Vehicle Class must be selected.', 'error');
+            logMessage('Error: At least one Vehicle Class must be selected.', 'error', new Date().toLocaleTimeString());
             return;
         }
 
@@ -96,44 +108,39 @@ document.addEventListener('DOMContentLoaded', () => {
             startDate: startDate.value,
             endDate: endDate.value,
             vehicleClasses: selectedVehicles,
-            isDryRun: false, // Hardcoded: Dry run is removed
-            enabledPhases: {
-                6: true, // Hardcoded: Phase 6 is always enabled
-                8: true, // Hardcoded: Phase 8 is always enabled
-                9: true, // Hardcoded: Phase 9 is always enabled
-            },
+            isDryRun: false,
+            enabledPhases: { 6: true, 8: true, 9: true },
             autoRefresh: autoRefreshToggle.checked
         };
 
         // Send configuration to background script to start the process
         chrome.runtime.sendMessage({ action: 'startAutomation', config }, (response) => {
             if (response && response.status === 'success') {
-                logMessage('Automation process initiated.', 'success');
-                proceedButton.disabled = true; // One-run-per-click protection
+                // The background script will now log this
             } else {
-                logMessage(response ? response.message : 'Failed to start. Is the correct tab open?', 'error');
+                logMessage(response ? response.message : 'Failed to start. Is the correct tab open?', 'error', new Date().toLocaleTimeString());
             }
         });
     });
 
     // "Abort" button stops the automation
     abortButton.addEventListener('click', () => {
-        chrome.runtime.sendMessage({ action: 'abortAutomation' }, (response) => {
-             if (response && response.status === 'success') {
-                logMessage('Abort signal sent.', 'info');
-                proceedButton.disabled = false;
-            } else {
-                 logMessage('Failed to send abort signal.', 'error');
-            }
+        chrome.runtime.sendMessage({ action: 'abortAutomation' });
+    });
+
+    // "Clear Log" button
+    clearLogButton.addEventListener('click', () => {
+        chrome.storage.local.set({ logHistory: [] }, () => {
+            logPanel.innerHTML = '';
+            logMessage('Log cleared.', 'info', new Date().toLocaleTimeString());
         });
     });
 
     // Listen for messages (like logs) from the background script
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.type === 'log') {
-            logMessage(message.text, message.level);
+            logMessage(message.text, message.level, message.timestamp);
         }
-        // Re-enable the proceed button if the process is finished or aborted
         if (message.type === 'automation_finished' || message.type === 'automation_aborted') {
             proceedButton.disabled = false;
         }
@@ -141,4 +148,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Initialization ---
     loadSettings();
+    loadLogHistory();
 });

@@ -38,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.sync.get('options', (data) => {
             const currentOptions = data.options || {};
             // Set default domain if it's not already set
-            allowListedDomain.value = currentOptions.allowListedDomain || 'https://control.transfeero.com/new_rides';
+            allowListedDomain.value = currentOptions.allowListedDomain || 'control.transfeero.com';
             defaultTolerance.value = currentOptions.defaultTolerance || 0;
             defaultVehicleClass.value = currentOptions.defaultVehicleClass || '';
         });

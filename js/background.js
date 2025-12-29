@@ -26,8 +26,24 @@ chrome.runtime.onStartup.addListener(() => {
  * @param {'info' | 'error' | 'success'} level The log level.
  */
 function log(text, level = 'info') {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = { timestamp, text, level };
+
     console.log(`[LOG] ${level.toUpperCase()}: ${text}`);
-    chrome.runtime.sendMessage({ type: 'log', text, level }).catch(err => console.log('Popup not open.'));
+
+    // Save to persistent storage
+    chrome.storage.local.get({ logHistory: [] }, (data) => {
+        let history = data.logHistory;
+        history.push(logEntry);
+        // Keep the log at a reasonable size
+        if (history.length > 100) {
+            history = history.slice(history.length - 100);
+        }
+        chrome.storage.local.set({ logHistory: history });
+    });
+
+    // Send to popup if it's open
+    chrome.runtime.sendMessage({ type: 'log', ...logEntry }).catch(err => {});
 }
 
 /**
