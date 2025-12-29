@@ -12,6 +12,7 @@
 let automationInProgress = false;
 let activeTabId = null;
 let currentConfig = {};
+let refreshIntervalId = null;
 
 // Persist the automation state to handle service worker termination
 chrome.runtime.onStartup.addListener(() => {
@@ -35,6 +36,16 @@ function log(text, level = 'info') {
  * @param {'info' | 'error' | 'success'} level The log level for the final message.
  */
 function resetState(reason, level = 'info') {
+    // --- Stop any ongoing refresh ---
+    if (refreshIntervalId) {
+        clearInterval(refreshIntervalId);
+        refreshIntervalId = null;
+        log('Auto-refresh stopped.', 'info');
+    }
+
+    const wasInProgress = automationInProgress; // Capture state before reset
+    const lastTabId = activeTabId; // Capture tabId before reset
+
     automationInProgress = false;
     activeTabId = null;
     chrome.storage.local.set({ automation_in_progress: false });
@@ -44,6 +55,18 @@ function resetState(reason, level = 'info') {
     chrome.runtime.sendMessage({ type: messageType }).catch(err => {});
 
     log(reason, level);
+
+    // --- Start new refresh if conditions are met ---
+    if (wasInProgress && level === 'success' && currentConfig.autoRefresh && lastTabId) {
+        log('Starting auto-refresh every 2 seconds.', 'info');
+        refreshIntervalId = setInterval(() => {
+            chrome.tabs.reload(lastTabId).catch(err => {
+                log('Failed to reload tab. It might have been closed.', 'error');
+                clearInterval(refreshIntervalId);
+                refreshIntervalId = null;
+            });
+        }, 2000);
+    }
 }
 
 // =================================================================
@@ -53,6 +76,15 @@ function resetState(reason, level = 'info') {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // --- Message from Popup ---
     if (message.action === 'startAutomation') {
+        // Clear any previous refresh interval when a new automation starts.
+        if (refreshIntervalId) {
+            clearInterval(refreshIntervalId);
+            refreshIntervalId = null;
+            log('Cleared previous auto-refresh schedule.', 'info');
+        }
+
+        log('Received startAutomation command from popup.', 'info');
+
         if (automationInProgress) {
             log('An automation process is already running.', 'error');
             sendResponse({ status: 'error', message: 'Automation already in progress.' });
@@ -112,18 +144,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.action === 'abortAutomation') {
-        if (!automationInProgress) {
-            sendResponse({ status: 'error', message: 'No automation to abort.' });
-            return;
+        if (!automationInProgress && !refreshIntervalId) {
+             sendResponse({ status: 'error', message: 'No automation or refresh to abort.' });
+             return;
         }
         resetState('Automation aborted by user.', 'info');
+        log('Automation aborted by user.');
         sendResponse({ status: 'success' });
     }
 
-    // --- Message from Content Script ---
-    // This message is sent after a successful vehicle selection (Phase 8).
+    // --- Messages from Content Script ---
+    if (message.type === 'content_script_log') {
+        // Just forward the log to the popup.
+        log(message.text, message.level);
+    }
+
     if (message.action === 'phase9_readyToAccept') {
-        if (!automationInProgress || sender.tab.id !== activeTabId) return; // Safety check
+        if (!automationInProgress || sender.tab.id !== activeTabId) return;
         executePhase9();
     }
 });

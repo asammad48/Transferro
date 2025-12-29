@@ -9,6 +9,17 @@
 console.log('Content script loaded.');
 
 /**
+ * Sends a log message to the background script to be displayed in the popup.
+ * @param {string} text The message to log.
+ * @param {'info' | 'error' | 'success'} [level='info'] The log level.
+ */
+function logToPopup(text, level = 'info') {
+  // Fire-and-forget message to the background for logging purposes.
+  chrome.runtime.sendMessage({ type: 'content_script_log', text, level }).catch(err => {});
+}
+
+
+/**
  * Main message listener for commands from the background script.
  * This acts as a router, triggering the correct function based on the 'action' received.
  * The script remains dormant until a message is received.
@@ -18,20 +29,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   switch (message.action) {
     case 'phase6_clickBooking':
-      // This phase is initiated by the user's "Proceed" click in the popup.
-      // It finds and clicks the initial booking button after strict validation.
       phase6_clickBooking(message.date, message.dateTolerance, message.vehicleClass, sendResponse);
       return true; // Indicates an asynchronous response.
 
     case 'phase8_selectVehicle':
-      // This phase runs on the new tab that opens after the booking button is clicked.
-      // It selects the correct vehicle from a dropdown using XPath.
       phase8_selectVehicle(message.vehicleClass, sendResponse);
       return true; // Indicates an asynchronous response.
 
     case 'phase9_acceptRide':
-      // This is the final step, clicking the confirmation button.
-      // It's only triggered if the user has explicitly enabled it in the options.
       phase9_acceptRide(sendResponse);
       return true; // Indicates an asynchronous response.
 
@@ -46,133 +51,158 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ========================
 // PHASE 6 — CLICK BOOKING
 // ========================
+
+/**
+ * Finds and clicks the first valid booking element on the page.
+ * It iterates through all potential elements, applying strict date and vehicle class checks.
+ * Detailed logs are sent to the popup at each step of the validation process.
+ */
 function phase6_clickBooking(targetDateStr, toleranceDays, vehicleClass, sendResponse) {
-  // Target selector from the requirements.
-  const bookingElement = document.querySelector('div.row.the_booking');
+    const bookingElements = document.querySelectorAll('div.row.the_booking');
+    logToPopup(`Found ${bookingElements.length} potential booking element(s).`);
 
-  // --- Preconditions ---
-  // The element must exist and be visible before any action is taken.
-  if (!bookingElement || !isElementVisible(bookingElement)) {
-    console.error('Booking element not found or not visible. Aborting.');
-    sendResponse({ status: 'error', message: 'Booking element not found or not visible.' });
-    return;
-  }
+    if (bookingElements.length === 0) {
+        logToPopup('No booking elements found on the page.', 'error');
+        sendResponse({ status: 'error', message: 'No booking elements found.' });
+        return;
+    }
 
-  // --- Strict Execution Rules ---
-  // These rules ensure the automation only proceeds if the page content matches user expectations.
-  const dateElement = bookingElement.querySelector('.booking_date'); // Assuming a selector for the date
-    const vehicleElement = bookingElement.querySelector('.vehicle_class'); // Assuming a selector for the vehicle
+    let matchFound = false;
+    let elementIndex = 0;
 
-  if (!dateElement || !vehicleElement) {
-      console.error('Date or vehicle information not found within the booking element. Aborting.');
-      sendResponse({ status: 'error', message: 'Missing date or vehicle info.' });
-      return;
-  }
+    for (const bookingElement of bookingElements) {
+        elementIndex++;
+        const logPrefix = `[Element ${elementIndex}]:`;
 
-  const actualDateStr = dateElement.textContent.trim();
-  const actualVehicle = vehicleElement.textContent.trim().toLowerCase();
+        if (!isElementVisible(bookingElement)) {
+            logToPopup(`${logPrefix} Skipping non-visible element.`);
+            continue;
+        }
 
-  // Rule 1: Date must match within the user-defined tolerance.
-  if (!isDateMatch(actualDateStr, targetDateStr, toleranceDays)) {
-    console.error(`Date mismatch. Expected: ${targetDateStr} (±${toleranceDays}), Found: ${actualDateStr}. Aborting.`);
-    sendResponse({ status: 'error', message: 'Date mismatch.' });
-    return;
-  }
+        const dateElement = bookingElement.querySelector('.booking_date');
+        const vehicleElement = bookingElement.querySelector('.vehicle_class');
 
-  // Rule 2: Vehicle class must match exactly (case-normalized).
-  if (actualVehicle !== vehicleClass.toLowerCase()) {
-    console.error(`Vehicle mismatch. Expected: ${vehicleClass.toLowerCase()}, Found: ${actualVehicle}. Aborting.`);
-    sendResponse({ status: 'error', message: 'Vehicle class mismatch.' });
-    return;
-  }
+        if (!dateElement || !vehicleElement) {
+            logToPopup(`${logPrefix} Skipping element missing date or vehicle info.`);
+            continue;
+        }
 
-  // --- Action ---
-  // Only if all checks pass, the script performs a single click.
-  console.log('All preconditions met for Phase 6. Clicking booking element.');
-  bookingElement.click();
-  sendResponse({ status: 'success', message: 'Booking element clicked.' });
+        const actualDateStr = dateElement.textContent.trim();
+        const actualVehicle = vehicleElement.textContent.trim().toLowerCase();
+        logToPopup(`${logPrefix} Found Date: "${actualDateStr}", Vehicle: "${actualVehicle}".`);
+
+        const dateMatch = isDateMatch(actualDateStr, targetDateStr, toleranceDays);
+        if (!dateMatch) {
+            logToPopup(`${logPrefix} Date mismatch. (Expected: ${targetDateStr} ±${toleranceDays} days).`);
+        }
+
+        const vehicleMatch = actualVehicle === vehicleClass.toLowerCase();
+        if (!vehicleMatch) {
+            logToPopup(`${logPrefix} Vehicle mismatch. (Expected: "${vehicleClass.toLowerCase()}").`);
+        }
+
+        if (dateMatch && vehicleMatch) {
+            logToPopup(`${logPrefix} Match found! Clicking element.`, 'success');
+            bookingElement.click();
+            sendResponse({ status: 'success', message: 'Booking element clicked.' });
+            matchFound = true;
+            break;
+        }
+    }
+
+    if (!matchFound) {
+        logToPopup('No booking element met all criteria.', 'error');
+        sendResponse({ status: 'error', message: 'No matching booking found.' });
+    }
 }
 
 
 // ========================
 // PHASE 8 — VEHICLE SELECTION (XPath)
 // ========================
+
+/**
+ * Selects the specified vehicle from a dropdown on the new ride page.
+ * It uses XPath to locate the dropdown and its options, ensuring precise selection.
+ * Delays are used to wait for the UI to render after the page loads and the dropdown opens.
+ */
 function phase8_selectVehicle(vehicleClass, sendResponse) {
-  // NOTE: The setTimeout delays here are a simple solution for this specific case.
-  // In a more complex, real-world application, a more robust approach would be
-  // to use a polling mechanism (e.g., setInterval) to check for the element's
-  // existence and visibility before proceeding, with a clear timeout.
-  // Use a small delay to ensure the UI is fully rendered after the new tab opens.
-  setTimeout(() => {
-    try {
-      // --- Action: Open Dropdown ---
-      const dropdown = getElementByXPath('//*[@id="select2-vehicle-container"]');
-      if (!dropdown || !isElementVisible(dropdown)) {
-        throw new Error('Vehicle dropdown not found or not visible.');
-      }
-      dropdown.click();
+    setTimeout(() => {
+        try {
+            logToPopup('Attempting to find and open vehicle dropdown.');
+            const dropdown = getElementByXPath('//*[@id="select2-vehicle-container"]');
+            if (!dropdown || !isElementVisible(dropdown)) {
+                logToPopup('Vehicle dropdown not found or not visible.', 'error');
+                throw new Error('Vehicle dropdown not found or not visible.');
+            }
+            dropdown.click();
+            logToPopup('Vehicle dropdown clicked.');
 
-      // --- Action: Find and Click Matching Option ---
-      // Another small delay for the dropdown options to become visible.
-      setTimeout(() => {
-        const options = getElementsByXPath('//*[@id="select2-vehicle-results"]/li');
-        let matchFound = false;
+            setTimeout(() => {
+                const options = getElementsByXPath('//*[@id="select2-vehicle-results"]/li');
+                logToPopup(`Found ${options.length} vehicle options in dropdown.`);
+                let matchFound = false;
 
-        // Iterate through options to find an exact, case-normalized match. No fuzzy matching.
-        for (const option of options) {
-          const optionText = option.textContent.trim().toLowerCase();
-          if (optionText === vehicleClass.toLowerCase()) {
-            console.log(`Matching vehicle found: "${option.textContent}". Clicking.`);
-            option.click();
-            matchFound = true;
-            break; // Exit after finding the first exact match. No index-based clicks.
-          }
+                for (const option of options) {
+                    const optionText = option.textContent.trim().toLowerCase();
+                    logToPopup(`Checking option: "${option.textContent.trim()}".`);
+                    if (optionText === vehicleClass.toLowerCase()) {
+                        logToPopup(`Matching vehicle found: "${option.textContent}". Clicking.`, 'success');
+                        option.click();
+                        matchFound = true;
+                        break;
+                    }
+                }
+
+                if (matchFound) {
+                    chrome.runtime.sendMessage({ action: 'phase9_readyToAccept' }, (response) => {
+                        logToPopup('Vehicle selected. Notifying background to proceed.');
+                        sendResponse({ status: 'success', message: 'Vehicle selected.' });
+                    });
+                } else {
+                    logToPopup(`No exact match found for vehicle class "${vehicleClass}".`, 'error');
+                    throw new Error(`No exact match found for vehicle class "${vehicleClass}". Aborting.`);
+                }
+            }, 500);
+
+        } catch (error) {
+            logToPopup(`Error in Phase 8: ${error.message}`, 'error');
+            sendResponse({ status: 'error', message: error.message });
         }
-
-        if (matchFound) {
-          // After successful selection, notify the background script to proceed to the final phase.
-          chrome.runtime.sendMessage({ action: 'phase9_readyToAccept' }, (response) => {
-            console.log('Ready for Phase 9, background script notified.', response);
-            sendResponse({ status: 'success', message: 'Vehicle selected.' });
-          });
-        } else {
-          // --- Abort if no match is found. This is a critical safety stop. ---
-          throw new Error(`No exact match found for vehicle class "${vehicleClass}". Aborting.`);
-        }
-      }, 500); // 500ms delay for options to appear
-
-    } catch (error) {
-      console.error('Error in Phase 8:', error.message);
-      sendResponse({ status: 'error', message: error.message });
-    }
-  }, 1000); // 1-second delay for the page to settle
+    }, 1000);
 }
 
 
 // ========================
 // PHASE 9 — ACCEPT RIDE
 // ========================
+
+/**
+ * Clicks the final confirmation button to accept the ride.
+ * It performs a final safety check for any visible error messages before clicking.
+ */
 function phase9_acceptRide(sendResponse) {
   try {
-    // --- Preconditions ---
+    logToPopup('Attempting to find final confirmation button.');
     const finalButton = getElementByXPath('//*[@id="ass_vehicle_div"]');
     if (!finalButton || !isElementVisible(finalButton)) {
+      logToPopup('Final confirmation button not found or not visible.', 'error');
       throw new Error('Final confirmation button not found or not visible.');
     }
+    logToPopup('Final confirmation button found.');
 
-    // Safety Check: Look for any visible error messages on the page before the final click.
-    const errorElement = document.querySelector('.error-message'); // Assuming a generic error selector
+    const errorElement = document.querySelector('.error-message');
     if (errorElement && isElementVisible(errorElement)) {
+        logToPopup('An error message is visible on the page. Aborting final click.', 'error');
         throw new Error('An error message is visible on the page. Aborting final click.');
     }
 
-    // --- Action ---
-    console.log('All preconditions met for Phase 9. Clicking final confirmation.');
-    finalButton.click(); // One click, no retries, no loops.
+    logToPopup('All checks passed. Clicking final confirmation.', 'success');
+    finalButton.click();
     sendResponse({ status: 'success', message: 'Final confirmation clicked.' });
 
   } catch (error) {
-    console.error('Error in Phase 9:', error.message);
+    logToPopup(`Error in Phase 9: ${error.message}`, 'error');
     sendResponse({ status: 'error', message: error.message });
   }
 }
@@ -182,28 +212,17 @@ function phase9_acceptRide(sendResponse) {
 // DOM SAFETY & HELPER FUNCTIONS
 // ========================
 
-/**
- * Checks if an element is currently visible in the DOM.
- * This is a crucial safety check to prevent interacting with hidden elements.
- */
 function isElementVisible(el) {
   return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
 }
 
-/**
- * Validates if the date found on the page is within the user-defined tolerance.
- * Parses dates strictly and returns false if parsing fails.
- */
 function isDateMatch(actualDateStr, targetDateStr, toleranceDays) {
     try {
         const actualDate = new Date(actualDateStr);
         const targetDate = new Date(targetDateStr);
-        // Invalidate if dates are not actual dates
         if (isNaN(actualDate.getTime()) || isNaN(targetDate.getTime())) return false;
-
         const diffTime = Math.abs(actualDate - targetDate);
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
         return diffDays <= toleranceDays;
     } catch (e) {
         console.error("Error parsing dates:", e);
@@ -211,12 +230,6 @@ function isDateMatch(actualDateStr, targetDateStr, toleranceDays) {
     }
 }
 
-
-/**
- * Finds a single element using an XPath expression.
- * Encapsulates the document.evaluate logic for reuse.
- * Returns null if not found, allowing the calling function to handle the error.
- */
 function getElementByXPath(path) {
   const element = document.evaluate(path, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
   if (!element) {
@@ -225,10 +238,6 @@ function getElementByXPath(path) {
   return element;
 }
 
-/**
- * Finds multiple elements using an XPath expression.
- * Returns an array of nodes.
- */
 function getElementsByXPath(path) {
   const iterator = document.evaluate(path, document, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
   const results = [];
