@@ -5,19 +5,15 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- Element References ---
-    const bookingDate = document.getElementById('booking-date');
-    const dateTolerance = document.getElementById('date-tolerance');
+    const startDate = document.getElementById('start-date');
+    const endDate = document.getElementById('end-date');
     const vehicleClass = document.getElementById('vehicle-class');
-    const dryRunToggle = document.getElementById('dry-run-toggle');
-    const phase6Toggle = document.getElementById('enable-phase6-toggle');
-    const phase8Toggle = document.getElementById('enable-phase8-toggle');
-    const phase9Toggle = document.getElementById('enable-phase9-toggle');
     const autoRefreshToggle = document.getElementById('auto-refresh-toggle');
     const proceedButton = document.getElementById('proceed-button');
     const abortButton = document.getElementById('abort-button');
     const logPanel = document.getElementById('log-panel');
 
-    const ALL_INPUTS = [bookingDate, dateTolerance, vehicleClass, dryRunToggle, phase6Toggle, phase8Toggle, phase9Toggle, autoRefreshToggle];
+    const ALL_INPUTS = [startDate, endDate, vehicleClass, autoRefreshToggle];
 
     // --- State Management ---
 
@@ -39,14 +35,11 @@ document.addEventListener('DOMContentLoaded', () => {
      * Saves the current state of all UI inputs to local storage.
      */
     const saveSettings = () => {
+        const selectedVehicles = Array.from(vehicleClass.selectedOptions).map(option => option.value);
         const settings = {
-            bookingDate: bookingDate.value,
-            dateTolerance: dateTolerance.value,
-            vehicleClass: vehicleClass.value,
-            isDryRun: dryRunToggle.checked,
-            isPhase6Enabled: phase6Toggle.checked,
-            isPhase8Enabled: phase8Toggle.checked,
-            isPhase9Enabled: phase9Toggle.checked,
+            startDate: startDate.value,
+            endDate: endDate.value,
+            vehicleClass: selectedVehicles,
             autoRefresh: autoRefreshToggle.checked,
         };
         chrome.storage.local.set({ settings });
@@ -59,13 +52,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadSettings = () => {
         chrome.storage.local.get('settings', (data) => {
             if (data.settings) {
-                bookingDate.value = data.settings.bookingDate || '';
-                dateTolerance.value = data.settings.dateTolerance || '0';
-                vehicleClass.value = data.settings.vehicleClass || '';
-                dryRunToggle.checked = data.settings.isDryRun !== false; // Default true
-                phase6Toggle.checked = data.settings.isPhase6Enabled === true;
-                phase8Toggle.checked = data.settings.isPhase8Enabled === true;
-                phase9Toggle.checked = data.settings.isPhase9Enabled === true;
+                startDate.value = data.settings.startDate || '';
+                endDate.value = data.settings.endDate || '';
+                const selectedVehicles = data.settings.vehicleClass || [];
+                Array.from(vehicleClass.options).forEach(option => {
+                    option.selected = selectedVehicles.includes(option.value);
+                });
                 autoRefreshToggle.checked = data.settings.autoRefresh === true;
                 console.log('Settings loaded.');
             }
@@ -90,24 +82,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // "Proceed" button initiates the automation
     proceedButton.addEventListener('click', () => {
         // Basic validation
-        if (!bookingDate.value) {
-            logMessage('Error: Target Date is required.', 'error');
+        if (!startDate.value) {
+            logMessage('Error: Start Date is required.', 'error');
             return;
         }
-        if (!vehicleClass.value) {
-            logMessage('Error: Vehicle Class is required.', 'error');
+        const selectedVehicles = Array.from(vehicleClass.selectedOptions).map(option => option.value);
+        if (selectedVehicles.length === 0) {
+            logMessage('Error: At least one Vehicle Class must be selected.', 'error');
             return;
         }
 
         const config = {
-            date: bookingDate.value,
-            dateTolerance: parseInt(dateTolerance.value, 10),
-            vehicleClass: vehicleClass.value,
-            isDryRun: dryRunToggle.checked,
+            startDate: startDate.value,
+            endDate: endDate.value,
+            vehicleClasses: selectedVehicles,
+            isDryRun: false, // Hardcoded: Dry run is removed
             enabledPhases: {
-                6: phase6Toggle.checked,
-                8: phase8Toggle.checked,
-                9: phase9Toggle.checked,
+                6: true, // Hardcoded: Phase 6 is always enabled
+                8: true, // Hardcoded: Phase 8 is always enabled
+                9: true, // Hardcoded: Phase 9 is always enabled
             },
             autoRefresh: autoRefreshToggle.checked
         };

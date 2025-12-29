@@ -159,6 +159,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         log(message.text, message.level);
     }
 
+    if (message.type === 'log_url') {
+        log(`New tab URL received: ${message.url}`, 'info');
+    }
+
     if (message.action === 'phase9_readyToAccept') {
         if (!automationInProgress || sender.tab.id !== activeTabId) return;
         executePhase9();
@@ -171,17 +175,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // =================================================================
 
 function executePhase6() {
-    if (!automationInProgress || !currentConfig.enabledPhases[6]) {
-        return resetState(currentConfig.enabledPhases[6] ? 'State error in P6.' : 'Phase 6 disabled.', 'info');
+    if (!automationInProgress) {
+        return resetState('State error in P6.', 'info');
     }
 
     log('Executing Phase 6: Finding and clicking booking...', 'info');
-
-    if (currentConfig.isDryRun) {
-        log('[Dry Run] Would click the booking button.', 'info');
-        // In a dry run, we simulate success to proceed to the next step logic
-        return executePhase8();
-    }
 
     sendMessageToContentScript(activeTabId, {
         action: 'phase6_clickBooking',
@@ -197,20 +195,15 @@ function executePhase6() {
 }
 
 function executePhase8() {
-    if (!automationInProgress || !currentConfig.enabledPhases[8]) {
-        return resetState(currentConfig.enabledPhases[8] ? 'State error in P8.' : 'Phase 8 disabled.', 'info');
+    if (!automationInProgress) {
+        return resetState('State error in P8.', 'info');
     }
 
     log('Executing Phase 8: Selecting vehicle...', 'info');
 
-    if (currentConfig.isDryRun) {
-        log(`[Dry Run] Would select vehicle: ${currentConfig.vehicleClass}.`, 'info');
-        return executePhase9(); // Simulate success
-    }
-
     sendMessageToContentScript(activeTabId, {
         action: 'phase8_selectVehicle',
-        vehicleClass: currentConfig.vehicleClass
+        vehicleClasses: currentConfig.vehicleClasses
     }, (response) => {
         if (!response || response.status !== 'success') {
             resetState(response ? response.message : 'Phase 8 failed.', 'error');
@@ -220,16 +213,11 @@ function executePhase8() {
 }
 
 function executePhase9() {
-    if (!automationInProgress || !currentConfig.enabledPhases[9]) {
-        return resetState(currentConfig.enabledPhases[9] ? 'State error in P9.' : 'Phase 9 disabled. Automation complete.', 'success');
+    if (!automationInProgress) {
+        return resetState('State error in P9.', 'info');
     }
 
     log('Executing Phase 9: Clicking final confirmation...', 'info');
-
-    if (currentConfig.isDryRun) {
-        log('[Dry Run] Would click the final "Accept" button.', 'info');
-        return resetState('Dry run complete.', 'success');
-    }
 
     sendMessageToContentScript(activeTabId, { action: 'phase9_acceptRide' }, (response) => {
         if (response && response.status === 'success') {
@@ -264,7 +252,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         // This is a critical safety check to ensure we only act on the intended page.
         const urlPattern = new RegExp(`^https?://${domain.replace('.', '\\.')}/new-ride/.*`);
         if (tab.url && tab.url.match(urlPattern)) {
-            log(`New ride tab detected (ID: ${tabId}). Updating active tab ID.`, 'info');
+            log(`New ride tab detected (ID: ${tabId}). URL: ${tab.url}`, 'info');
+            log(`Retaining automation state for new tab.`, 'info');
             activeTabId = tabId; // Update the active tab ID to the new tab.
 
             // Inject the content script into the new tab programmatically

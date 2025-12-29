@@ -29,11 +29,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   switch (message.action) {
     case 'phase6_clickBooking':
-      phase6_clickBooking(message.date, message.dateTolerance, message.vehicleClass, sendResponse);
+      phase6_clickBooking(message.startDate, message.endDate, message.vehicleClasses, sendResponse);
       return true; // Indicates an asynchronous response.
 
     case 'phase8_selectVehicle':
-      phase8_selectVehicle(message.vehicleClass, sendResponse);
+      phase8_selectVehicle(message.vehicleClasses, sendResponse);
       return true; // Indicates an asynchronous response.
 
     case 'phase9_acceptRide':
@@ -57,7 +57,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  * It iterates through all potential elements, applying strict date and vehicle class checks.
  * Detailed logs are sent to the popup at each step of the validation process.
  */
-function phase6_clickBooking(targetDateStr, toleranceDays, vehicleClass, sendResponse) {
+function phase6_clickBooking(startDateStr, endDateStr, vehicleClasses, sendResponse) {
     const bookingElements = document.querySelectorAll('div.row.the_booking');
     logToPopup(`Found ${bookingElements.length} potential booking element(s).`);
 
@@ -69,6 +69,7 @@ function phase6_clickBooking(targetDateStr, toleranceDays, vehicleClass, sendRes
 
     let matchFound = false;
     let elementIndex = 0;
+    const lowercasedVehicleClasses = vehicleClasses.map(vc => vc.toLowerCase());
 
     for (const bookingElement of bookingElements) {
         elementIndex++;
@@ -91,20 +92,31 @@ function phase6_clickBooking(targetDateStr, toleranceDays, vehicleClass, sendRes
         const actualVehicle = vehicleElement.textContent.trim().toLowerCase();
         logToPopup(`${logPrefix} Found Date: "${actualDateStr}", Vehicle: "${actualVehicle}".`);
 
-        const dateMatch = isDateMatch(actualDateStr, targetDateStr, toleranceDays);
+        const dateMatch = isDateInRange(actualDateStr, startDateStr, endDateStr);
         if (!dateMatch) {
-            logToPopup(`${logPrefix} Date mismatch. (Expected: ${targetDateStr} ±${toleranceDays} days).`);
+            logToPopup(`${logPrefix} Date mismatch. (Not in range: ${startDateStr} to ${endDateStr || startDateStr}).`);
         }
 
-        const vehicleMatch = actualVehicle === vehicleClass.toLowerCase();
+        const vehicleMatch = lowercasedVehicleClasses.includes(actualVehicle);
         if (!vehicleMatch) {
-            logToPopup(`${logPrefix} Vehicle mismatch. (Expected: "${vehicleClass.toLowerCase()}").`);
+            logToPopup(`${logPrefix} Vehicle mismatch. (Not one of: "${vehicleClasses.join(', ')}").`);
         }
 
         if (dateMatch && vehicleMatch) {
-            logToPopup(`${logPrefix} Match found! Clicking element.`, 'success');
+            logToPopup(`${logPrefix} Match found! Preparing to open new tab.`, 'success');
+
+            const onclickAttr = bookingElement.getAttribute('onclick');
+            const urlMatch = onclickAttr.match(/window\.open\("([^"]+)"/);
+            if (urlMatch && urlMatch[1]) {
+                const newTabUrl = urlMatch[1];
+                logToPopup(`${logPrefix} Extracted new tab URL: ${newTabUrl}`);
+                chrome.runtime.sendMessage({ type: 'log_url', url: newTabUrl });
+            } else {
+                logToPopup(`${logPrefix} Could not extract URL from onclick attribute.`, 'error');
+            }
+
             bookingElement.click();
-            logToPopup(`${logPrefix} Match found! Button Clicked.`, 'success');
+            logToPopup(`${logPrefix} Clicked element to open new tab.`, 'success');
             sendResponse({ status: 'success', message: 'Booking element clicked.' });
             matchFound = true;
             break;
@@ -127,10 +139,10 @@ function phase6_clickBooking(targetDateStr, toleranceDays, vehicleClass, sendRes
  * It uses XPath to locate the dropdown and its options, ensuring precise selection.
  * Delays are used to wait for the UI to render after the page loads and the dropdown opens.
  */
-function phase8_selectVehicle(vehicleClass, sendResponse) {
+function phase8_selectVehicle(vehicleClasses, sendResponse) {
     setTimeout(() => {
         try {
-            logToPopup('Attempting to find and open vehicle dropdown.');
+            logToPopup('Attempting to find and open vehicle dropdown with ID "select2-vehicle-container".');
             const dropdown = getElementByXPath('//*[@id="select2-vehicle-container"]');
             if (!dropdown || !isElementVisible(dropdown)) {
                 logToPopup('Vehicle dropdown not found or not visible.', 'error');
@@ -143,15 +155,16 @@ function phase8_selectVehicle(vehicleClass, sendResponse) {
                 const options = getElementsByXPath('//*[@id="select2-vehicle-results"]/li');
                 logToPopup(`Found ${options.length} vehicle options in dropdown.`);
                 let matchFound = false;
+                const lowercasedVehicleClasses = vehicleClasses.map(vc => vc.toLowerCase());
 
                 for (const option of options) {
                     const optionText = option.textContent.trim().toLowerCase();
                     logToPopup(`Checking option: "${option.textContent.trim()}".`);
-                    if (optionText === vehicleClass.toLowerCase()) {
+                    if (lowercasedVehicleClasses.includes(optionText)) {
                         logToPopup(`Matching vehicle found: "${option.textContent}". Clicking.`, 'success');
                         option.click();
                         matchFound = true;
-                        break;
+                        break; // Click the first one that matches the user's list
                     }
                 }
 
@@ -161,8 +174,9 @@ function phase8_selectVehicle(vehicleClass, sendResponse) {
                         sendResponse({ status: 'success', message: 'Vehicle selected.' });
                     });
                 } else {
-                    logToPopup(`No exact match found for vehicle class "${vehicleClass}".`, 'error');
-                    throw new Error(`No exact match found for vehicle class "${vehicleClass}". Aborting.`);
+                    const desiredVehicles = vehicleClasses.join('", "');
+                    logToPopup(`No match found for any of the desired vehicle classes ("${desiredVehicles}").`, 'error');
+                    throw new Error(`No match found for desired vehicle classes. Aborting.`);
                 }
             }, 500);
 
@@ -217,16 +231,29 @@ function isElementVisible(el) {
   return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
 }
 
-function isDateMatch(actualDateStr, targetDateStr, toleranceDays) {
+function isDateInRange(actualDateStr, startDateStr, endDateStr) {
     try {
         const actualDate = new Date(actualDateStr);
-        const targetDate = new Date(targetDateStr);
-        if (isNaN(actualDate.getTime()) || isNaN(targetDate.getTime())) return false;
-        const diffTime = Math.abs(actualDate - targetDate);
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        return diffDays <= toleranceDays;
+        // Set hours to 0 to compare dates only
+        actualDate.setHours(0, 0, 0, 0);
+
+        const startDate = new Date(startDateStr);
+        startDate.setHours(0, 0, 0, 0);
+
+        if (isNaN(actualDate.getTime()) || isNaN(startDate.getTime())) return false;
+
+        // If no end date, check for an exact match with the start date.
+        if (!endDateStr) {
+            return actualDate.getTime() === startDate.getTime();
+        }
+
+        const endDate = new Date(endDateStr);
+        endDate.setHours(0, 0, 0, 0);
+        if (isNaN(endDate.getTime())) return false;
+
+        return actualDate >= startDate && actualDate <= endDate;
     } catch (e) {
-        console.error("Error parsing dates:", e);
+        logToPopup(`Error parsing dates: ${e.message}`, 'error');
         return false;
     }
 }
