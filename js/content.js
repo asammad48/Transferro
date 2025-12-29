@@ -143,10 +143,11 @@ function phase8_selectVehicle(vehicleClasses, sendResponse) {
     const DROPDOWN_OPTIONS_XPATH = '//*[@id="select2-vehicle-results"]/li';
 
     // Stage 1: Wait for the dropdown container to be visible
-    waitForElement(DROPDOWN_CONTAINER_XPATH, 10000).then(dropdown => {
-        logToPopup('Vehicle dropdown container is visible. Clicking it.', 'success');
-        dropdown.click();
-        logToPopup('Vehicle dropdown container clicked. Now waiting for options to appear.');
+    waitForElement(DROPDOWN_CONTAINER_XPATH, 10000).then(dropdownContainer => {
+        logToPopup('Vehicle dropdown container is visible. Clicking its parent.', 'success');
+        const dropdownOpener = dropdownContainer.parentElement;
+        dropdownOpener.click();
+        logToPopup('Vehicle dropdown parent clicked. Now waiting for options to appear.');
 
         // Stage 2: Wait for the dropdown options to appear
         waitForElement(DROPDOWN_OPTIONS_XPATH, 5000).then(firstOption => {
