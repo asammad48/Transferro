@@ -171,17 +171,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // =================================================================
 
 function executePhase6() {
-    if (!automationInProgress || !currentConfig.enabledPhases[6]) {
-        return resetState(currentConfig.enabledPhases[6] ? 'State error in P6.' : 'Phase 6 disabled.', 'info');
+    if (!automationInProgress) {
+        return resetState('State error in P6.', 'info');
     }
 
     log('Executing Phase 6: Finding and clicking booking...', 'info');
-
-    if (currentConfig.isDryRun) {
-        log('[Dry Run] Would click the booking button.', 'info');
-        // In a dry run, we simulate success to proceed to the next step logic
-        return executePhase8();
-    }
 
     sendMessageToContentScript(activeTabId, {
         action: 'phase6_clickBooking',
@@ -197,16 +191,11 @@ function executePhase6() {
 }
 
 function executePhase8() {
-    if (!automationInProgress || !currentConfig.enabledPhases[8]) {
-        return resetState(currentConfig.enabledPhases[8] ? 'State error in P8.' : 'Phase 8 disabled.', 'info');
+    if (!automationInProgress) {
+        return resetState('State error in P8.', 'info');
     }
 
     log('Executing Phase 8: Selecting vehicle...', 'info');
-
-    if (currentConfig.isDryRun) {
-        log(`[Dry Run] Would select vehicle(s): ${currentConfig.vehicleClasses.join(', ')}.`, 'info');
-        return executePhase9(); // Simulate success
-    }
 
     sendMessageToContentScript(activeTabId, {
         action: 'phase8_selectVehicle',
@@ -220,16 +209,11 @@ function executePhase8() {
 }
 
 function executePhase9() {
-    if (!automationInProgress || !currentConfig.enabledPhases[9]) {
-        return resetState(currentConfig.enabledPhases[9] ? 'State error in P9.' : 'Phase 9 disabled. Automation complete.', 'success');
+    if (!automationInProgress) {
+        return resetState('State error in P9.', 'info');
     }
 
     log('Executing Phase 9: Clicking final confirmation...', 'info');
-
-    if (currentConfig.isDryRun) {
-        log('[Dry Run] Would click the final "Accept" button.', 'info');
-        return resetState('Dry run complete.', 'success');
-    }
 
     sendMessageToContentScript(activeTabId, { action: 'phase9_acceptRide' }, (response) => {
         if (response && response.status === 'success') {

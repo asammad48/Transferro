@@ -8,16 +8,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const startDate = document.getElementById('start-date');
     const endDate = document.getElementById('end-date');
     const vehicleClass = document.getElementById('vehicle-class');
-    const dryRunToggle = document.getElementById('dry-run-toggle');
-    const phase6Toggle = document.getElementById('enable-phase6-toggle');
-    const phase8Toggle = document.getElementById('enable-phase8-toggle');
-    const phase9Toggle = document.getElementById('enable-phase9-toggle');
     const autoRefreshToggle = document.getElementById('auto-refresh-toggle');
     const proceedButton = document.getElementById('proceed-button');
     const abortButton = document.getElementById('abort-button');
     const logPanel = document.getElementById('log-panel');
 
-    const ALL_INPUTS = [startDate, endDate, vehicleClass, dryRunToggle, phase6Toggle, phase8Toggle, phase9Toggle, autoRefreshToggle];
+    const ALL_INPUTS = [startDate, endDate, vehicleClass, autoRefreshToggle];
 
     // --- State Management ---
 
@@ -44,10 +40,6 @@ document.addEventListener('DOMContentLoaded', () => {
             startDate: startDate.value,
             endDate: endDate.value,
             vehicleClass: selectedVehicles,
-            isDryRun: dryRunToggle.checked,
-            isPhase6Enabled: phase6Toggle.checked,
-            isPhase8Enabled: phase8Toggle.checked,
-            isPhase9Enabled: phase9Toggle.checked,
             autoRefresh: autoRefreshToggle.checked,
         };
         chrome.storage.local.set({ settings });
@@ -66,10 +58,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 Array.from(vehicleClass.options).forEach(option => {
                     option.selected = selectedVehicles.includes(option.value);
                 });
-                dryRunToggle.checked = data.settings.isDryRun !== false; // Default true
-                phase6Toggle.checked = data.settings.isPhase6Enabled === true;
-                phase8Toggle.checked = data.settings.isPhase8Enabled === true;
-                phase9Toggle.checked = data.settings.isPhase9Enabled === true;
                 autoRefreshToggle.checked = data.settings.autoRefresh === true;
                 console.log('Settings loaded.');
             }
@@ -108,11 +96,11 @@ document.addEventListener('DOMContentLoaded', () => {
             startDate: startDate.value,
             endDate: endDate.value,
             vehicleClasses: selectedVehicles,
-            isDryRun: dryRunToggle.checked,
+            isDryRun: false, // Hardcoded: Dry run is removed
             enabledPhases: {
-                6: phase6Toggle.checked,
-                8: phase8Toggle.checked,
-                9: phase9Toggle.checked,
+                6: true, // Hardcoded: Phase 6 is always enabled
+                8: true, // Hardcoded: Phase 8 is always enabled
+                9: true, // Hardcoded: Phase 9 is always enabled
             },
             autoRefresh: autoRefreshToggle.checked
         };
