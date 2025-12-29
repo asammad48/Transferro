@@ -103,9 +103,20 @@ function phase6_clickBooking(startDateStr, endDateStr, vehicleClasses, sendRespo
         }
 
         if (dateMatch && vehicleMatch) {
-            logToPopup(`${logPrefix} Match found! Clicking element.`, 'success');
+            logToPopup(`${logPrefix} Match found! Preparing to open new tab.`, 'success');
+
+            const onclickAttr = bookingElement.getAttribute('onclick');
+            const urlMatch = onclickAttr.match(/window\.open\("([^"]+)"/);
+            if (urlMatch && urlMatch[1]) {
+                const newTabUrl = urlMatch[1];
+                logToPopup(`${logPrefix} Extracted new tab URL: ${newTabUrl}`);
+                chrome.runtime.sendMessage({ type: 'log_url', url: newTabUrl });
+            } else {
+                logToPopup(`${logPrefix} Could not extract URL from onclick attribute.`, 'error');
+            }
+
             bookingElement.click();
-            logToPopup(`${logPrefix} Match found! Button Clicked.`, 'success');
+            logToPopup(`${logPrefix} Clicked element to open new tab.`, 'success');
             sendResponse({ status: 'success', message: 'Booking element clicked.' });
             matchFound = true;
             break;
@@ -131,7 +142,7 @@ function phase6_clickBooking(startDateStr, endDateStr, vehicleClasses, sendRespo
 function phase8_selectVehicle(vehicleClasses, sendResponse) {
     setTimeout(() => {
         try {
-            logToPopup('Attempting to find and open vehicle dropdown.');
+            logToPopup('Attempting to find and open vehicle dropdown with ID "select2-vehicle-container".');
             const dropdown = getElementByXPath('//*[@id="select2-vehicle-container"]');
             if (!dropdown || !isElementVisible(dropdown)) {
                 logToPopup('Vehicle dropdown not found or not visible.', 'error');

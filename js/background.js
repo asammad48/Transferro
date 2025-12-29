@@ -159,6 +159,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         log(message.text, message.level);
     }
 
+    if (message.type === 'log_url') {
+        log(`New tab URL received: ${message.url}`, 'info');
+    }
+
     if (message.action === 'phase9_readyToAccept') {
         if (!automationInProgress || sender.tab.id !== activeTabId) return;
         executePhase9();
@@ -248,7 +252,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         // This is a critical safety check to ensure we only act on the intended page.
         const urlPattern = new RegExp(`^https?://${domain.replace('.', '\\.')}/new-ride/.*`);
         if (tab.url && tab.url.match(urlPattern)) {
-            log(`New ride tab detected (ID: ${tabId}). Updating active tab ID.`, 'info');
+            log(`New ride tab detected (ID: ${tabId}). URL: ${tab.url}`, 'info');
+            log(`Retaining automation state for new tab.`, 'info');
             activeTabId = tabId; // Update the active tab ID to the new tab.
 
             // Inject the content script into the new tab programmatically
