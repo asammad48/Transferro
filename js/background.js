@@ -204,13 +204,13 @@ function executePhase8() {
     log('Executing Phase 8: Selecting vehicle...', 'info');
 
     if (currentConfig.isDryRun) {
-        log(`[Dry Run] Would select vehicle: ${currentConfig.vehicleClass}.`, 'info');
+        log(`[Dry Run] Would select vehicle(s): ${currentConfig.vehicleClasses.join(', ')}.`, 'info');
         return executePhase9(); // Simulate success
     }
 
     sendMessageToContentScript(activeTabId, {
         action: 'phase8_selectVehicle',
-        vehicleClass: currentConfig.vehicleClass
+        vehicleClasses: currentConfig.vehicleClasses
     }, (response) => {
         if (!response || response.status !== 'success') {
             resetState(response ? response.message : 'Phase 8 failed.', 'error');

@@ -25,16 +25,21 @@
     <h3>Booking Automation Control</h3>
 
     <div class="row">
-        <label for="booking-date">Target Date:</label>
-        <input type="date" id="booking-date">
+        <label for="start-date">Start Date:</label>
+        <input type="date" id="start-date">
     </div>
     <div class="row">
-        <label for="date-tolerance">Date Tolerance (± days):</label>
-        <input type="number" id="date-tolerance" min="0" value="0">
+        <label for="end-date">End Date:</label>
+        <input type="date" id="end-date">
     </div>
     <div class="row">
-        <label for="vehicle-class">Vehicle Class (Exact):</label>
-        <input type="text" id="vehicle-class" placeholder="e.g., Sedan, SUV">
+        <label for="vehicle-class">Vehicle Class:</label>
+        <select id="vehicle-class" multiple>
+            <option value="Standard Van">Standard Van</option>
+            <option value="Economy">Economy</option>
+            <option value="Standard Sedan">Standard Sedan</option>
+            <option value="Minibus 12">Minibus 12</option>
+        </select>
     </div>
 
     <hr>
