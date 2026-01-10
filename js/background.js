@@ -12,7 +12,8 @@
 let automationInProgress = false;
 let activeTabId = null;
 let currentConfig = {};
-let refreshIntervalId = null;
+// Use a timeout ID for the refresh loop, not an interval ID
+let refreshTimeoutId = null;
 
 // Persist the automation state to handle service worker termination
 chrome.runtime.onStartup.addListener(() => {
@@ -73,9 +74,9 @@ function log(text, level = 'info') {
 function resetState(reason, level = 'info') {
     log(`Resetting state. Reason: ${reason}`, level);
     // --- Stop any ongoing refresh ---
-    if (refreshIntervalId) {
-        clearInterval(refreshIntervalId);
-        refreshIntervalId = null;
+    if (refreshTimeoutId) {
+        clearTimeout(refreshTimeoutId);
+        refreshTimeoutId = null;
         log('Auto-refresh stopped.', 'info');
     }
 
@@ -97,17 +98,10 @@ function resetState(reason, level = 'info') {
     log(reason, level);
 
     // --- Start new refresh if conditions are met ---
-    // If the process was running and the auto-refresh toggle is on, reload the tab.
-    // This effectively restarts the flow from the current page after success or failure.
+    // If the process was running and the auto-refresh toggle is on, start the continuous refresh loop.
     if (wasInProgress && currentConfig.autoRefresh && lastTabId) {
-        log('Auto-refresh is enabled. Reloading tab to restart the process...', 'info');
-        // A short delay can prevent race conditions where the tab reloads
-        // before all state-reset operations are complete.
-        setTimeout(() => {
-            chrome.tabs.reload(lastTabId).catch(err => {
-                log(`Failed to reload tab ${lastTabId}. It might have been closed.`, 'error');
-            });
-        }, 1000); // 1-second delay
+        log('Auto-refresh is enabled. Starting continuous refresh loop.', 'info');
+        scheduleNextRefresh(lastTabId);
     }
 }
 
@@ -119,9 +113,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // --- Message from Popup ---
     if (message.action === 'startAutomation') {
         // Clear any previous refresh interval when a new automation starts.
-        if (refreshIntervalId) {
-            clearInterval(refreshIntervalId);
-            refreshIntervalId = null;
+        if (refreshTimeoutId) {
+            clearTimeout(refreshTimeoutId);
+            refreshTimeoutId = null;
             log('Cleared previous auto-refresh schedule.', 'info');
         }
 
@@ -187,7 +181,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message.action === 'abortAutomation') {
         log('Received abortAutomation command from popup.', 'info');
-        if (!automationInProgress && !refreshIntervalId) {
+        if (!automationInProgress && !refreshTimeoutId) {
              log('No automation or refresh process is currently running to abort.', 'error');
              sendResponse({ status: 'error', message: 'No automation or refresh to abort.' });
              return;
@@ -250,7 +244,7 @@ function executePhase8() {
 
     sendMessageToContentScript(activeTabId, {
         action: 'phase8_selectVehicle',
-        vehicleClasses: currentConfig.vehicleClasses
+        vehicleClasses: currentConfig.phase8VehicleClasses
     }, (response) => {
         if (!response || response.status !== 'success') {
             resetState(response ? response.message : 'Phase 8 failed.', 'error');
@@ -283,9 +277,6 @@ function executePhase9() {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     // We only care about tabs that are fully loaded and match the allow-listed URL pattern.
     if (changeInfo.status !== 'complete' || !automationInProgress) {
-        if (changeInfo.status === 'complete') {
-             // log(`Tab ${tabId} updated, but automation is not in progress. Ignoring.`, 'info');
-        }
         return;
     }
 
@@ -328,6 +319,44 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
         resetState('Tracked tab was closed by user.', 'info');
     }
 });
+
+
+// =================================================================
+// AUTO-REFRESH LOGIC
+// =================================================================
+
+/**
+ * Schedules the next tab refresh with a random delay.
+ * This creates a continuous, randomized loop.
+ * @param {number} tabId The ID of the tab to be refreshed.
+ */
+function scheduleNextRefresh(tabId) {
+    // --- Clear any existing scheduled refresh ---
+    if (refreshTimeoutId) {
+        clearTimeout(refreshTimeoutId);
+    }
+
+    // --- Calculate random interval ---
+    const minSeconds = 7;
+    const maxSeconds = 30;
+    const randomInterval = Math.floor(Math.random() * (maxSeconds - minSeconds + 1) + minSeconds) * 1000;
+    log(`Next refresh scheduled in ${randomInterval / 1000} seconds.`, 'info');
+
+    // --- Schedule the reload ---
+    refreshTimeoutId = setTimeout(() => {
+        log(`Reloading tab ${tabId} as part of the auto-refresh cycle.`, 'info');
+        chrome.tabs.reload(tabId, (reloaded) => {
+            // After the reload, check if the tab still exists and schedule the next one.
+            if (chrome.runtime.lastError) {
+                log(`Failed to reload tab ${tabId}: ${chrome.runtime.lastError.message}. Stopping refresh cycle.`, 'error');
+                resetState('Auto-refresh tab was closed or could not be accessed.', 'error');
+            } else {
+                // Recursively call to continue the loop
+                scheduleNextRefresh(tabId);
+            }
+        });
+    }, randomInterval);
+}
 
 
 // =================================================================

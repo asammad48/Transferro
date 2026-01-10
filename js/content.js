@@ -131,59 +131,79 @@ function phase6_clickBooking(startDateStr, endDateStr, vehicleClasses, sendRespo
 
 
 // ========================
-// PHASE 8 — VEHICLE SELECTION (XPath)
+// PHASE 8 — VEHICLE SELECTION (jQuery Injection)
 // ========================
 
 /**
- * Selects the specified vehicle from a dropdown on the new ride page.
- * It uses a polling mechanism to wait for the dropdown to become visible before interacting with it.
+ * Injects a script into the page to interact with the jQuery-based select2 dropdown.
+ * This is more reliable than simulating clicks, especially for complex UI elements.
  */
 function phase8_selectVehicle(vehicleClasses, sendResponse) {
-    const DROPDOWN_CONTAINER_XPATH = '//*[@id="select2-vehicle-container"]';
-    const DROPDOWN_OPTIONS_XPATH = '//*[@id="select2-vehicle-results"]/li';
+    logToPopup(`Attempting to select one of the following vehicles: "${vehicleClasses.join(', ')}"`, 'info');
 
-    // Stage 1: Wait for the dropdown container to be visible
-    waitForElement(DROPDOWN_CONTAINER_XPATH, 10000).then(dropdownContainer => {
-        logToPopup('Vehicle dropdown container is visible. Clicking its parent.', 'success');
-        const dropdownOpener = dropdownContainer.parentElement;
-        dropdownOpener.click();
-        logToPopup('Vehicle dropdown parent clicked. Now waiting for options to appear.');
-
-        // Stage 2: Wait for the dropdown options to appear
-        waitForElement(DROPDOWN_OPTIONS_XPATH, 5000).then(firstOption => {
-            const options = getElementsByXPath(DROPDOWN_OPTIONS_XPATH);
-            logToPopup(`Found ${options.length} vehicle options in dropdown.`);
-
-            let matchFound = false;
-            const lowercasedVehicleClasses = vehicleClasses.map(vc => vc.toLowerCase());
-
-            for (const option of options) {
-                const optionText = option.textContent.trim().toLowerCase();
-                logToPopup(`Checking option: "${option.textContent.trim()}".`);
-                if (lowercasedVehicleClasses.includes(optionText)) {
-                    logToPopup(`Matching vehicle found: "${option.textContent}". Clicking.`, 'success');
-                    option.click();
-                    matchFound = true;
-                    break;
+    // The script to be injected. Note the use of JSON.stringify to safely pass the array.
+    const scriptToInject = `
+        (function() {
+            try {
+                const $select = $('#vehicle');
+                if (!$select.length) {
+                    throw new Error('Vehicle select dropdown (#vehicle) not found.');
                 }
-            }
 
-            if (matchFound) {
-                logToPopup('Vehicle selected. Notifying background to proceed.');
-                chrome.runtime.sendMessage({ action: 'phase9_readyToAccept' });
-                sendResponse({ status: 'success', message: 'Vehicle selected.' });
-            } else {
-                const desiredVehicles = vehicleClasses.join('", "');
-                throw new Error(`No match found for any desired vehicle classes ("${desiredVehicles}").`);
+                // Programmatically open the select2 dropdown.
+                $select.select2('open');
+                console.log('select2 dropdown opened');
+
+                const vehicleClasses = ${JSON.stringify(vehicleClasses)};
+                let matchFound = false;
+
+                for (const targetText of vehicleClasses) {
+                    console.log('Searching for vehicle containing:', targetText);
+                    const option = $select.find('option:not(:disabled)').filter(function() {
+                        return $(this).text().includes(targetText);
+                    }).first();
+
+                    if (option.length) {
+                        console.log('Found matching option:', option.text());
+                        $select.val(option.val()).trigger('change');
+                        matchFound = true;
+                        break; // Stop after finding the first match
+                    }
+                }
+
+                $select.select2('close');
+
+                if (matchFound) {
+                    window.postMessage({ type: 'FROM_CONTENT_SCRIPT', status: 'success', message: 'Vehicle selected.' }, '*');
+                } else {
+                    throw new Error('No available vehicle found for any of the desired classes.');
+                }
+            } catch (error) {
+                console.error('Injected script error:', error.message);
+                window.postMessage({ type: 'FROM_CONTENT_SCRIPT', status: 'error', message: error.message }, '*');
             }
-        }).catch(error => {
-            logToPopup('Dropdown options did not appear within 5 seconds.', 'error');
-            sendResponse({ status: 'error', message: 'Dropdown options did not appear.' });
-        });
-    }).catch(error => {
-        logToPopup('Vehicle dropdown container did not become visible within 10 seconds.', 'error');
-        sendResponse({ status: 'error', message: 'Vehicle dropdown container not found.' });
-    });
+        })();
+    `;
+
+    // Listen for the result from the injected script
+    window.addEventListener('message', function(event) {
+        if (event.source === window && event.data.type === 'FROM_CONTENT_SCRIPT') {
+            if (event.data.status === 'success') {
+                logToPopup('Vehicle selected successfully via injected script.', 'success');
+                chrome.runtime.sendMessage({ action: 'phase9_readyToAccept' });
+                sendResponse({ status: 'success' });
+            } else {
+                logToPopup(`Error in injected script: ${event.data.message}`, 'error');
+                sendResponse({ status: 'error', message: event.data.message });
+            }
+        }
+    }, { once: true }); // Important to avoid listening to other messages
+
+    // Inject the script into the page
+    const script = document.createElement('script');
+    script.textContent = scriptToInject;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove(); // Clean up the script tag
 }
 
 
