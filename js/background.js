@@ -244,7 +244,7 @@ function executePhase8() {
 
     sendMessageToContentScript(activeTabId, {
         action: 'phase8_selectVehicle',
-        vehicleClasses: currentConfig.vehicleClasses
+        vehicleClasses: currentConfig.phase8VehicleClasses
     }, (response) => {
         if (!response || response.status !== 'success') {
             resetState(response ? response.message : 'Phase 8 failed.', 'error');

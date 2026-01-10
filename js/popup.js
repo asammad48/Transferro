@@ -8,13 +8,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const startDate = document.getElementById('start-date');
     const endDate = document.getElementById('end-date');
     const vehicleClass = document.getElementById('vehicle-class');
+    const phase8VehicleClass = document.getElementById('phase8-vehicle-class');
     const autoRefreshToggle = document.getElementById('auto-refresh-toggle');
     const proceedButton = document.getElementById('proceed-button');
     const abortButton = document.getElementById('abort-button');
     const clearLogButton = document.getElementById('clear-log-button');
     const logPanel = document.getElementById('log-panel');
 
-    const ALL_INPUTS = [startDate, endDate, vehicleClass, autoRefreshToggle];
+    const ALL_INPUTS = [startDate, endDate, vehicleClass, phase8VehicleClass, autoRefreshToggle];
 
     // --- State Management ---
 
@@ -37,10 +38,12 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const saveSettings = () => {
         const selectedVehicles = Array.from(vehicleClass.selectedOptions).map(option => option.value);
+        const selectedPhase8Vehicles = Array.from(phase8VehicleClass.selectedOptions).map(option => option.value);
         const settings = {
             startDate: startDate.value,
             endDate: endDate.value,
             vehicleClass: selectedVehicles,
+            phase8VehicleClass: selectedPhase8Vehicles,
             autoRefresh: autoRefreshToggle.checked,
         };
         chrome.storage.local.set({ settings });
@@ -55,10 +58,17 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.settings) {
                 startDate.value = data.settings.startDate || '';
                 endDate.value = data.settings.endDate || '';
+
                 const selectedVehicles = data.settings.vehicleClass || [];
                 Array.from(vehicleClass.options).forEach(option => {
                     option.selected = selectedVehicles.includes(option.value);
                 });
+
+                const selectedPhase8Vehicles = data.settings.phase8VehicleClass || [];
+                Array.from(phase8VehicleClass.options).forEach(option => {
+                    option.selected = selectedPhase8Vehicles.includes(option.value);
+                });
+
                 autoRefreshToggle.checked = data.settings.autoRefresh === true;
                 console.log('Settings loaded.');
             }
@@ -104,10 +114,17 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const selectedPhase8Vehicles = Array.from(phase8VehicleClass.selectedOptions).map(option => option.value);
+        if (selectedPhase8Vehicles.length === 0) {
+            logMessage('Error: At least one Phase 8 Vehicle must be selected.', 'error', new Date().toLocaleTimeString());
+            return;
+        }
+
         const config = {
             startDate: startDate.value,
             endDate: endDate.value,
             vehicleClasses: selectedVehicles,
+            phase8VehicleClasses: selectedPhase8Vehicles,
             isDryRun: false,
             enabledPhases: { 6: true, 8: true, 9: true },
             autoRefresh: autoRefreshToggle.checked
