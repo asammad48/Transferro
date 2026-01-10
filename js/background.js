@@ -11,28 +11,15 @@
 // In-memory state variables. These are reset if the service worker is terminated.
 let automationInProgress = false;
 let activeTabId = null;
+let originalTabId = null; // To keep track of the initial tab
+let retryCount = 0; // To prevent infinite retry loops
+const MAX_RETRIES = 3; // Maximum number of retries for a failed step
 let currentConfig = {};
 let refreshIntervalId = null;
 
 // Persist the automation state to handle service worker termination
 chrome.runtime.onStartup.addListener(() => {
   chrome.storage.local.set({ automation_in_progress: false });
-});
-
-
-/**
- * Sets the default allow-listed domain upon first installation.
- */
-chrome.runtime.onInstalled.addListener(() => {
-    chrome.storage.sync.get('options', (data) => {
-        const options = data.options || {};
-        if (options.allowListedDomain === undefined) {
-            options.allowListedDomain = 'control.transfeero.com';
-            chrome.storage.sync.set({ options }, () => {
-                console.log('Default allow-listed domain set on installation.');
-            });
-        }
-    });
 });
 
 
@@ -68,18 +55,22 @@ function log(text, level = 'info') {
  * @param {'info' | 'error' | 'success'} level The log level for the final message.
  */
 function resetState(reason, level = 'info') {
+    log(`Resetting state. Reason: ${reason}`, 'info');
     // --- Stop any ongoing refresh ---
     if (refreshIntervalId) {
         clearInterval(refreshIntervalId);
         refreshIntervalId = null;
-        log('Auto-refresh stopped.', 'info');
+        log('Auto-refresh cycle stopped.', 'info');
     }
 
     const wasInProgress = automationInProgress; // Capture state before reset
     const lastTabId = activeTabId; // Capture tabId before reset
+    log(`State before reset: InProgress=${wasInProgress}, ActiveTab=${lastTabId}, OriginalTab=${originalTabId}, RetryCount=${retryCount}`, 'info');
 
     automationInProgress = false;
     activeTabId = null;
+    originalTabId = null;
+    retryCount = 0;
     chrome.storage.local.set({ automation_in_progress: false });
 
     // Notify the popup that the process has finished
@@ -126,10 +117,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Find the active tab in the current window.
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             if (tabs.length === 0) {
+                log('No active tab found to start automation.', 'error');
                 return sendResponse({ status: 'error', message: 'No active tab found.' });
             }
             const activeTab = tabs[0];
             activeTabId = activeTab.id;
+            originalTabId = activeTab.id; // Set the original tab ID
+            retryCount = 0; // Reset retry count for a new automation run
+
+            log(`Automation initiated. Original Tab ID: ${originalTabId}, Active Tab ID: ${activeTabId}`, 'info');
+            log(`Configuration received: ${JSON.stringify(message.config)}`, 'info');
 
             // CRITICAL SAFETY CHECK: Verify the tab URL against the allow-listed domain before injecting.
             chrome.storage.sync.get('options', (data) => {
@@ -206,12 +203,56 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // AUTOMATION PHASES
 // =================================================================
 
-function executePhase6() {
-    if (!automationInProgress) {
-        return resetState('State error in P6.', 'info');
+let phaseToRetry = null; // State to manage retries after a tab refresh
+
+/**
+ * Handles a failure in an automation phase by logging, retrying, or aborting.
+ * @param {string} failedPhase The name of the phase that failed (e.g., 'Phase 6').
+ * @param {string} errorMessage The error message from the failed phase.
+ */
+function handleFailure(failedPhase, errorMessage) {
+    log(`Failure in ${failedPhase}: ${errorMessage}. Retry count: ${retryCount}`, 'error');
+
+    // --- Trigger Alarm ---
+    const notificationId = `automation-failure-${Date.now()}`;
+    chrome.notifications.create(notificationId, {
+        type: 'basic',
+        iconUrl: '../icons/icon128.png',
+        title: 'Automation Alert',
+        message: `An error occurred during ${failedPhase}. The process will be retried. Error: ${errorMessage}`
+    });
+
+
+    if (retryCount >= MAX_RETRIES) {
+        resetState(`Max retries reached for ${failedPhase}. Aborting automation.`, 'error');
+        return;
     }
 
-    log('Executing Phase 6: Finding and clicking booking...', 'info');
+    retryCount++;
+    log(`Retrying ${failedPhase}. Attempt ${retryCount} of ${MAX_RETRIES}.`, 'info');
+
+    // Phase 6 starts on the original tab, subsequent phases are on the active (new) tab.
+    const tabIdToReload = (failedPhase === 'Phase 6') ? originalTabId : activeTabId;
+    phaseToRetry = failedPhase; // Set the phase to be re-run after the reload
+
+    chrome.tabs.get(tabIdToReload, (tab) => {
+        if (chrome.runtime.lastError || !tab) {
+            resetState(`Tab to reload (ID: ${tabIdToReload}) not found. Aborting.`, 'error');
+            return;
+        }
+        log(`Reloading Tab ID: ${tabIdToReload} to retry ${failedPhase}.`, 'info');
+        chrome.tabs.reload(tabIdToReload);
+    });
+}
+
+
+function executePhase6() {
+    if (!automationInProgress) {
+        log('Attempted to execute Phase 6, but automation is not in progress. Aborting.', 'info');
+        return;
+    }
+
+    log(`Executing Phase 6: Finding and clicking booking in Tab ID: ${activeTabId}`, 'info');
 
     sendMessageToContentScript(activeTabId, {
         action: 'phase6_clickBooking',
@@ -219,43 +260,50 @@ function executePhase6() {
     }, (response) => {
         if (response && response.status === 'success') {
             log('Phase 6 successful.', 'success');
+            retryCount = 0; // Reset retry count on success
             // Phase 8 will be triggered by the new tab listener.
         } else {
-            resetState(response ? response.message : 'Phase 6 failed.', 'error');
+            handleFailure('Phase 6', response ? response.message : 'No response');
         }
     });
 }
 
 function executePhase8() {
     if (!automationInProgress) {
-        return resetState('State error in P8.', 'info');
+        log('Attempted to execute Phase 8, but automation is not in progress. Aborting.', 'info');
+        return;
     }
 
-    log('Executing Phase 8: Selecting vehicle...', 'info');
+    log(`Executing Phase 8: Selecting vehicle in Tab ID: ${activeTabId}`, 'info');
 
     sendMessageToContentScript(activeTabId, {
         action: 'phase8_selectVehicle',
         vehicleClasses: currentConfig.vehicleClasses
     }, (response) => {
-        if (!response || response.status !== 'success') {
-            resetState(response ? response.message : 'Phase 8 failed.', 'error');
+        if (response && response.status === 'success') {
+            log('Phase 8 successful, vehicle selected.', 'success');
+            retryCount = 0; // Reset retry count on success
+            // Success continues via the 'phase9_readyToAccept' message listener
+        } else {
+            handleFailure('Phase 8', response ? response.message : 'No response');
         }
-        // Success is handled by the 'phase9_readyToAccept' message listener
     });
 }
 
 function executePhase9() {
     if (!automationInProgress) {
-        return resetState('State error in P9.', 'info');
+        log('Attempted to execute Phase 9, but automation is not in progress. Aborting.', 'info');
+        return;
     }
 
-    log('Executing Phase 9: Clicking final confirmation...', 'info');
+    log(`Executing Phase 9: Clicking final confirmation in Tab ID: ${activeTabId}`, 'info');
 
     sendMessageToContentScript(activeTabId, { action: 'phase9_acceptRide' }, (response) => {
         if (response && response.status === 'success') {
+            log('Phase 9 successful, ride accepted.', 'success');
             resetState('Automation complete!', 'success');
         } else {
-            resetState(response ? response.message : 'Phase 9 failed.', 'error');
+            handleFailure('Phase 9', response ? response.message : 'No response');
         }
     });
 }
@@ -270,6 +318,32 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status !== 'complete' || !automationInProgress) {
         return;
     }
+    log(`onUpdated event fired for Tab ID: ${tabId}. Status: ${changeInfo.status}, URL: ${tab.url}`, 'info');
+
+    // --- Handle Retries ---
+    if (phaseToRetry) {
+        const expectedTabId = (phaseToRetry === 'Phase 6') ? originalTabId : activeTabId;
+        if (tabId === expectedTabId) {
+            log(`Tab ${tabId} reloaded, re-executing ${phaseToRetry}.`, 'info');
+            const phase = phaseToRetry;
+            phaseToRetry = null; // Clear the retry state
+
+            // Re-inject content script before executing the phase
+            chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                files: ['js/content.js']
+            }).then(() => {
+                log(`Content script re-injected into Tab ID: ${tabId} for retry.`, 'info');
+                if (phase === 'Phase 6') executePhase6();
+                else if (phase === 'Phase 8') executePhase8();
+                else if (phase === 'Phase 9') executePhase9();
+            }).catch(err => {
+                 resetState(`Failed to re-inject script for retry into tab ${tabId}: ${err.message}`, 'error');
+            });
+            return; // Stop further processing to avoid conflicts
+        }
+    }
+
 
     // Load allow-listed domain from sync storage
     chrome.storage.sync.get('options', (data) => {
@@ -280,7 +354,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             return;
         }
 
-        // Check if the new tab's URL matches the pattern.
+        // Check if the new tab's URL matches the pattern for transition from Phase 6 to 8.
         // This is a critical safety check to ensure we only act on the intended page.
         const urlPattern = new RegExp(`^https?://${domain.replace('.', '\\.')}/new-ride/.*`);
         if (tab.url && tab.url.match(urlPattern)) {
@@ -305,6 +379,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 // Clean up state if the tracked tab is closed by the user.
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+    log(`onRemoved event fired for Tab ID: ${tabId}. Is tracked tab: ${tabId === activeTabId}`, 'info');
     if (tabId === activeTabId) {
         resetState('Tracked tab was closed by user.', 'info');
     }
