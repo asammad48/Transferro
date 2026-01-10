@@ -16,7 +16,26 @@ let refreshIntervalId = null;
 
 // Persist the automation state to handle service worker termination
 chrome.runtime.onStartup.addListener(() => {
+  log('Browser startup detected. Ensuring automation state is reset.', 'info');
   chrome.storage.local.set({ automation_in_progress: false });
+});
+
+// Set default options on initial installation.
+chrome.runtime.onInstalled.addListener((details) => {
+    if (details.reason === 'install') {
+        chrome.storage.sync.get('options', (data) => {
+            const currentOptions = data.options || {};
+            if (!currentOptions.allowListedDomain) {
+                const defaultOptions = {
+                    ...currentOptions,
+                    allowListedDomain: 'control.transfeero.com'
+                };
+                chrome.storage.sync.set({ options: defaultOptions }, () => {
+                    console.log('Default allow-listed domain set on installation.');
+                });
+            }
+        });
+    }
 });
 
 
@@ -52,6 +71,7 @@ function log(text, level = 'info') {
  * @param {'info' | 'error' | 'success'} level The log level for the final message.
  */
 function resetState(reason, level = 'info') {
+    log(`Resetting state. Reason: ${reason}`, level);
     // --- Stop any ongoing refresh ---
     if (refreshIntervalId) {
         clearInterval(refreshIntervalId);
@@ -70,18 +90,24 @@ function resetState(reason, level = 'info') {
     const messageType = level === 'error' ? 'automation_aborted' : 'automation_finished';
     chrome.runtime.sendMessage({ type: messageType }).catch(err => {});
 
+    if (level === 'error') {
+        triggerFailureAlarm(reason);
+    }
+
     log(reason, level);
 
     // --- Start new refresh if conditions are met ---
-    if (wasInProgress && level === 'success' && currentConfig.autoRefresh && lastTabId) {
-        log('Starting auto-refresh every 2 seconds.', 'info');
-        refreshIntervalId = setInterval(() => {
+    // If the process was running and the auto-refresh toggle is on, reload the tab.
+    // This effectively restarts the flow from the current page after success or failure.
+    if (wasInProgress && currentConfig.autoRefresh && lastTabId) {
+        log('Auto-refresh is enabled. Reloading tab to restart the process...', 'info');
+        // A short delay can prevent race conditions where the tab reloads
+        // before all state-reset operations are complete.
+        setTimeout(() => {
             chrome.tabs.reload(lastTabId).catch(err => {
-                log('Failed to reload tab. It might have been closed.', 'error');
-                clearInterval(refreshIntervalId);
-                refreshIntervalId = null;
+                log(`Failed to reload tab ${lastTabId}. It might have been closed.`, 'error');
             });
-        }, 2000);
+        }, 1000); // 1-second delay
     }
 }
 
@@ -160,27 +186,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.action === 'abortAutomation') {
+        log('Received abortAutomation command from popup.', 'info');
         if (!automationInProgress && !refreshIntervalId) {
+             log('No automation or refresh process is currently running to abort.', 'error');
              sendResponse({ status: 'error', message: 'No automation or refresh to abort.' });
              return;
         }
         resetState('Automation aborted by user.', 'info');
-        log('Automation aborted by user.');
         sendResponse({ status: 'success' });
     }
 
     // --- Messages from Content Script ---
     if (message.type === 'content_script_log') {
         // Just forward the log to the popup.
-        log(message.text, message.level);
+        log(`[Content Script]: ${message.text}`, message.level);
     }
 
     if (message.type === 'log_url') {
-        log(`New tab URL received: ${message.url}`, 'info');
+        log(`[Content Script]: New tab URL received: ${message.url}`, 'info');
     }
 
     if (message.action === 'phase9_readyToAccept') {
-        if (!automationInProgress || sender.tab.id !== activeTabId) return;
+        log('Content script is ready for Phase 9.', 'info');
+        if (!automationInProgress || sender.tab.id !== activeTabId) {
+            log('State mismatch for Phase 9 readiness. Aborting.', 'error');
+            return;
+        }
         executePhase9();
     }
 });
@@ -252,6 +283,9 @@ function executePhase9() {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     // We only care about tabs that are fully loaded and match the allow-listed URL pattern.
     if (changeInfo.status !== 'complete' || !automationInProgress) {
+        if (changeInfo.status === 'complete') {
+             // log(`Tab ${tabId} updated, but automation is not in progress. Ignoring.`, 'info');
+        }
         return;
     }
 
@@ -290,10 +324,30 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // Clean up state if the tracked tab is closed by the user.
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
     if (tabId === activeTabId) {
+        log(`Active tab (ID: ${tabId}) was closed by the user. Resetting state.`, 'info');
         resetState('Tracked tab was closed by user.', 'info');
     }
 });
 
+
+// =================================================================
+// ALARMS & NOTIFICATIONS
+// =================================================================
+
+/**
+ * Creates a Chrome notification to alert the user of a critical failure.
+ * @param {string} reason The reason for the failure, to be displayed in the notification.
+ */
+function triggerFailureAlarm(reason) {
+    log('Triggering failure alarm notification.', 'info');
+    chrome.notifications.create({
+        type: 'basic',
+        iconUrl: '/icons/icon128.png',
+        title: 'Automation Process Failed',
+        message: `The automation process stopped due to an error: ${reason}`,
+        priority: 2
+    });
+}
 
 // =================================================================
 // UTILITY FUNCTIONS
