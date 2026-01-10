@@ -21,6 +21,22 @@ chrome.runtime.onStartup.addListener(() => {
 
 
 /**
+ * Sets the default allow-listed domain upon first installation.
+ */
+chrome.runtime.onInstalled.addListener(() => {
+    chrome.storage.sync.get('options', (data) => {
+        const options = data.options || {};
+        if (options.allowListedDomain === undefined) {
+            options.allowListedDomain = 'control.transfeero.com';
+            chrome.storage.sync.set({ options }, () => {
+                console.log('Default allow-listed domain set on installation.');
+            });
+        }
+    });
+});
+
+
+/**
  * Logs a message to the popup and the service worker console.
  * @param {string} text The message to log.
  * @param {'info' | 'error' | 'success'} level The log level.
