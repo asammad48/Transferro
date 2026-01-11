@@ -11,6 +11,7 @@
 // In-memory state variables. These are reset if the service worker is terminated.
 let automationInProgress = false;
 let activeTabId = null;
+let baseTabId = null; // Persistently tracks the initial tab
 let currentConfig = {};
 // Use a timeout ID for the refresh loop, not an interval ID
 let refreshTimeoutId = null;
@@ -81,10 +82,10 @@ function resetState(reason, level = 'info') {
     }
 
     const wasInProgress = automationInProgress; // Capture state before reset
-    const lastTabId = activeTabId; // Capture tabId before reset
 
     automationInProgress = false;
     activeTabId = null;
+    // Do not reset baseTabId here, it's needed for the refresh.
     chrome.storage.local.set({ automation_in_progress: false });
 
     // Notify the popup that the process has finished
@@ -99,10 +100,11 @@ function resetState(reason, level = 'info') {
 
     // --- Start new refresh if conditions are met ---
     // If the process was running and the auto-refresh toggle is on, start the continuous refresh loop.
-    if (wasInProgress && currentConfig.autoRefresh && lastTabId) {
+    if (wasInProgress && currentConfig.autoRefresh && baseTabId) {
         log('Auto-refresh is enabled. Starting continuous refresh loop.', 'info');
-        scheduleNextRefresh(lastTabId);
+        scheduleNextRefresh(baseTabId);
     }
+    baseTabId = null; // Clean up the base tab ID after use.
 }
 
 // =================================================================
@@ -134,6 +136,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
             const activeTab = tabs[0];
             activeTabId = activeTab.id;
+            baseTabId = activeTab.id; // Store the initial tab ID
 
             // CRITICAL SAFETY CHECK: Verify the tab URL against the allow-listed domain before injecting.
             chrome.storage.sync.get('options', (data) => {
@@ -364,16 +367,29 @@ function scheduleNextRefresh(tabId) {
 // =================================================================
 
 /**
- * Creates a Chrome notification to alert the user of a critical failure.
- * @param {string} reason The reason for the failure, to be displayed in the notification.
+ * Triggers an audible alarm and a visual notification for critical failures.
+ * @param {string} reason The reason for the failure.
  */
 function triggerFailureAlarm(reason) {
-    log('Triggering failure alarm notification.', 'info');
+    const alarmMessage = `Automation failed: ${reason}`;
+    log('Triggering failure alarm.', 'info');
+
+    // Audible alarm using Text-to-Speech
+    chrome.tts.speak(alarmMessage, {
+        'rate': 1.0, // Normal speaking rate
+        'onEvent': function(event) {
+            if (event.type === 'error') {
+                log(`TTS Error: ${event.errorMessage}`, 'error');
+            }
+        }
+    });
+
+    // Visual notification as a fallback
     chrome.notifications.create({
         type: 'basic',
         iconUrl: '/icons/icon128.png',
         title: 'Automation Process Failed',
-        message: `The automation process stopped due to an error: ${reason}`,
+        message: alarmMessage,
         priority: 2
     });
 }
