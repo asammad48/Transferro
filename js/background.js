@@ -71,24 +71,24 @@ function log(text, level = 'info') {
  * Resets the automation state, enabling the user to start a new run.
  * @param {string} reason The reason for resetting the state.
  * @param {'info' | 'error' | 'success'} level The log level for the final message.
+ * @param {object} [options={}] Additional options for resetting state.
+ * @param {boolean} [options.allowRefresh=true] Whether to allow a new refresh cycle to start.
  */
-function resetState(reason, level = 'info') {
+function resetState(reason, level = 'info', options = {}) {
+    const { allowRefresh = true } = options;
+
     log(`Resetting state. Reason: ${reason}`, level);
-    // --- Stop any ongoing refresh ---
     if (refreshTimeoutId) {
         clearTimeout(refreshTimeoutId);
         refreshTimeoutId = null;
-        log('Auto-refresh stopped.', 'info');
+        log('Auto-refresh timer cleared.', 'info');
     }
 
-    const wasInProgress = automationInProgress; // Capture state before reset
-
+    const wasInProgress = automationInProgress;
     automationInProgress = false;
     activeTabId = null;
-    // Do not reset baseTabId here, it's needed for the refresh.
     chrome.storage.local.set({ automation_in_progress: false });
 
-    // Notify the popup that the process has finished
     const messageType = level === 'error' ? 'automation_aborted' : 'automation_finished';
     chrome.runtime.sendMessage({ type: messageType }).catch(err => {});
 
@@ -99,12 +99,13 @@ function resetState(reason, level = 'info') {
     log(reason, level);
 
     // --- Start new refresh if conditions are met ---
-    // If the process was running and the auto-refresh toggle is on, start the continuous refresh loop.
-    if (wasInProgress && currentConfig.autoRefresh && baseTabId) {
+    if (allowRefresh && wasInProgress && currentConfig.autoRefresh && baseTabId) {
         log('Auto-refresh is enabled. Starting continuous refresh loop.', 'info');
         scheduleNextRefresh(baseTabId);
+    } else {
+        // If no refresh is scheduled, clean up the base tab ID.
+        baseTabId = null;
     }
-    baseTabId = null; // Clean up the base tab ID after use.
 }
 
 // =================================================================
@@ -185,11 +186,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'abortAutomation') {
         log('Received abortAutomation command from popup.', 'info');
         if (!automationInProgress && !refreshTimeoutId) {
-             log('No automation or refresh process is currently running to abort.', 'error');
-             sendResponse({ status: 'error', message: 'No automation or refresh to abort.' });
-             return;
+            log('No automation or refresh process is currently running to abort.', 'error');
+            return sendResponse({ status: 'error', message: 'No automation or refresh to abort.' });
         }
-        resetState('Automation aborted by user.', 'info');
+        // When the user aborts, prevent the refresh cycle from starting again.
+        resetState('Automation aborted by user.', 'info', { allowRefresh: false });
         sendResponse({ status: 'success' });
     }
 
@@ -243,29 +244,24 @@ function executePhase6() {
 }
 
 /**
- * Executes the vehicle selection logic directly in the page's main world context.
- * This avoids CSP violations caused by injecting script tags.
+ * Executes the vehicle selection logic with a callback to handle success or failure.
+ * @param {(success: boolean, message: string) => void} callback The callback function.
  */
-function executePhase8() {
+function executePhase8(callback) {
     if (!automationInProgress) {
-        return resetState('State error in P8.', 'info');
+        // If automation was aborted, do nothing.
+        return;
     }
     log('Executing Phase 8: Selecting vehicle via secure script execution...', 'info');
 
-    // This function will be executed in the page's context.
-    // It has access to the page's JS variables (like jQuery's $).
     const selectVehicleInPage = (vehicleClasses) => {
         try {
             const $select = $('#vehicle');
-            if (!$select.length) {
-                throw new Error('Vehicle select dropdown (#vehicle) not found.');
-            }
+            if (!$select.length) throw new Error('Vehicle select dropdown (#vehicle) not found.');
             $select.select2('open');
             let matchFound = false;
             for (const targetText of vehicleClasses) {
-                const option = $select.find('option:not(:disabled)').filter(function() {
-                    return $(this).text().includes(targetText);
-                }).first();
+                const option = $select.find('option:not(:disabled)').filter(function() { return $(this).text().includes(targetText); }).first();
                 if (option.length) {
                     $select.val(option.val()).trigger('change');
                     matchFound = true;
@@ -273,13 +269,9 @@ function executePhase8() {
                 }
             }
             $select.select2('close');
-            if (matchFound) {
-                return { status: 'success', message: 'Vehicle selected successfully.' };
-            } else {
-                throw new Error('No available vehicle found for any of the desired classes.');
-            }
+            if (matchFound) return { status: 'success', message: 'Vehicle selected successfully.' };
+            throw new Error('No available vehicle found for any of the desired classes.');
         } catch (error) {
-            // Ensure the error message is a string for proper serialization.
             return { status: 'error', message: error.toString() };
         }
     };
@@ -291,20 +283,16 @@ function executePhase8() {
         args: [currentConfig.phase8VehicleClasses]
     }, (injectionResults) => {
         if (chrome.runtime.lastError) {
-            // Handle errors during script injection itself.
-            resetState(`Phase 8 injection failed: ${chrome.runtime.lastError.message}`, 'error');
+            callback(false, `Phase 8 injection failed: ${chrome.runtime.lastError.message}`);
             return;
         }
 
-        // Check the result from the executed function.
         const result = injectionResults[0].result;
         if (result && result.status === 'success') {
             log('Phase 8 successful: Vehicle selected.', 'success');
-            // Proceed directly to the next phase.
-            executePhase9();
+            callback(true, result.message);
         } else {
-            // The script executed but returned an error.
-            resetState(result ? result.message : 'Phase 8 failed with an unknown error.', 'error');
+            callback(false, result ? result.message : 'Phase 8 failed with an unknown error.');
         }
     });
 }
@@ -329,52 +317,82 @@ function executePhase9() {
 // TAB & NAVIGATION HANDLING
 // =================================================================
 
-// Listener for new tabs, specifically for handling the transition from P6 to P8.
+// Listener for new tabs, with retry logic for Phase 8.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    // We only care about tabs that are fully loaded and match the allow-listed URL pattern.
     if (changeInfo.status !== 'complete' || !automationInProgress) {
         return;
     }
 
-    // Load allow-listed domain from sync storage
     chrome.storage.sync.get('options', (data) => {
         const domain = data.options?.allowListedDomain;
         if (!domain) {
-            // If no domain is set, we cannot proceed safely.
-            if(activeTabId === tabId) resetState('Allow-listed domain not set in options. Aborting.', 'error');
+            if (activeTabId === tabId) resetState('Allow-listed domain not set. Aborting.', 'error');
             return;
         }
 
-        // Check if the new tab's URL matches the pattern.
-        // This is a critical safety check to ensure we only act on the intended page.
         const urlPattern = new RegExp(`^https?://${domain.replace('.', '\\.')}/new-ride/.*`);
         if (tab.url && tab.url.match(urlPattern)) {
             log(`New ride tab detected (ID: ${tabId}). URL: ${tab.url}`, 'info');
-            log(`Retaining automation state for new tab.`, 'info');
-            activeTabId = tabId; // Update the active tab ID to the new tab.
+            activeTabId = tabId;
 
             log('Waiting 2 seconds before starting Phase 8...', 'info');
             setTimeout(() => {
-                // Re-check state in case the user aborted during the delay
                 if (!automationInProgress) {
                     log('Automation aborted during Phase 8 delay.', 'info');
                     return;
                 }
-                // Inject the content script into the new tab programmatically
+
+                // Inject the content script *once* before starting the retry loop.
                 chrome.scripting.executeScript({
                     target: { tabId: activeTabId },
                     files: ['js/content.js']
                 }).then(() => {
-                    log('Content script injected into new tab.', 'info');
-                    // Now that the script is injected, we can proceed with Phase 8.
-                    executePhase8();
+                    log('Content script injected. Starting Phase 8 retry loop.', 'info');
+                    attemptPhase8WithRetries(3); // Start the retry process with 3 attempts.
                 }).catch(err => {
-                     resetState(`Failed to inject script into new tab: ${err.message}`, 'error');
+                    resetState(`Failed to inject script for Phase 8: ${err.message}`, 'error');
                 });
+
             }, 2000);
         }
     });
 });
+
+
+/**
+ * Attempts to execute Phase 8 and retries on failure.
+ * @param {number} attemptsLeft The number of remaining attempts.
+ */
+function attemptPhase8WithRetries(attemptsLeft) {
+    if (!automationInProgress) {
+        log('Aborting Phase 8 retry loop.', 'info');
+        return;
+    }
+
+    if (attemptsLeft <= 0) {
+        log('Phase 8 failed after all retries. Restarting the process.', 'error');
+        // Close the current failed tab before restarting.
+        chrome.tabs.remove(activeTabId, () => {
+            // Reset state and trigger the auto-refresh/restart logic.
+            resetState('Phase 8 failed permanently.', 'error');
+        });
+        return;
+    }
+
+    log(`Attempting Phase 8. Attempts left: ${attemptsLeft}`, 'info');
+    executePhase8((success, message) => {
+        if (success) {
+            // On success, proceed to the final phase.
+            executePhase9();
+        } else {
+            // On failure, log the error and schedule a retry.
+            log(`Phase 8 attempt failed: ${message}. Retrying in 4 seconds...`, 'error');
+            setTimeout(() => {
+                attemptPhase8WithRetries(attemptsLeft - 1);
+            }, 4000);
+        }
+    });
+}
 
 // Clean up state if the tracked tab is closed by the user.
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
