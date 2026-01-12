@@ -131,100 +131,18 @@ function phase6_clickBooking(startDateStr, endDateStr, vehicleClasses, sendRespo
 
 
 // ========================
-// PHASE 8 — VEHICLE SELECTION (jQuery Injection)
+// PHASE 8 — VEHICLE SELECTION
 // ========================
 
 /**
- * Injects a script into the page to interact with the jQuery-based select2 dropdown.
- * This is more reliable than simulating clicks, especially for complex UI elements.
+ * Phase 8 is now handled directly by the background script using chrome.scripting.executeScript.
+ * This function remains as a placeholder to prevent errors if it's accidentally called.
  */
 function phase8_selectVehicle(vehicleClasses, sendResponse) {
-    const execute = () => {
-        logToPopup(`Attempting to select one of the following vehicles: "${vehicleClasses.join(', ')}"`, 'info');
-
-        // The script to be injected. Note the use of JSON.stringify to safely pass the array.
-        const scriptToInject = `
-            (function() {
-                try {
-                    console.log('Phase 8 Injected Script: Starting vehicle selection.');
-                    const $select = $('#vehicle');
-                    if (!$select.length) {
-                        console.log('Phase 8 Injected Script: Main dropdown not found.');
-                        throw new Error('Vehicle select dropdown (#vehicle) not found.');
-                    }
-                    console.log('Phase 8 Injected Script: Main dropdown appeared.');
-
-                    // Programmatically open the select2 dropdown.
-                    $select.select2('open');
-                    console.log('Phase 8 Injected Script: select2 dropdown opened.');
-
-                    const options = $select.find('option');
-                    if(options.length > 0) {
-                        console.log('Phase 8 Injected Script: Dropdown options appeared.');
-                    } else {
-                        console.log('Phase 8 Injected Script: Dropdown options not appeared.');
-                    }
-
-                    const vehicleClasses = ${JSON.stringify(vehicleClasses)};
-                    let matchFound = false;
-
-                    for (const targetText of vehicleClasses) {
-                        console.log('Phase 8 Injected Script: Searching for vehicle containing:', targetText);
-                        const option = $select.find('option:not(:disabled)').filter(function() {
-                            return $(this).text().includes(targetText);
-                        }).first();
-
-                        if (option.length) {
-                            console.log('Phase 8 Injected Script: Found matching option:', option.text());
-                            $select.val(option.val()).trigger('change');
-                            matchFound = true;
-                            break; // Stop after finding the first match
-                        }
-                    }
-
-                    $select.select2('close');
-
-                    if (matchFound) {
-                        console.log('Phase 8 Injected Script: Vehicle selected successfully.');
-                        window.postMessage({ type: 'FROM_CONTENT_SCRIPT', status: 'success', message: 'Vehicle selected.' }, '*');
-                    } else {
-                        throw new Error('No available vehicle found for any of the desired classes.');
-                    }
-                } catch (error) {
-                    console.error('Phase 8 Injected Script Error:', error.message);
-                    window.postMessage({ type: 'FROM_CONTENT_SCRIPT', status: 'error', message: error.message }, '*');
-                }
-            })();
-        `;
-
-        // Listen for the result from the injected script
-        window.addEventListener('message', function(event) {
-            if (event.source === window && event.data.type === 'FROM_CONTENT_SCRIPT') {
-                if (event.data.status === 'success') {
-                    logToPopup('Vehicle selected successfully via injected script.', 'success');
-                    chrome.runtime.sendMessage({ action: 'phase9_readyToAccept' });
-                    sendResponse({ status: 'success' });
-                } else {
-                    logToPopup(`Error in injected script: ${event.data.message}`, 'error');
-                    sendResponse({ status: 'error', message: event.data.message });
-                }
-            }
-        }, { once: true }); // Important to avoid listening to other messages
-
-        // Inject the script into the page
-        const script = document.createElement('script');
-        script.textContent = scriptToInject;
-        (document.head || document.documentElement).appendChild(script);
-        script.remove(); // Clean up the script tag
-    };
-
-    if (document.readyState === 'loading') {
-        logToPopup('DOM not fully loaded. Deferring Phase 8 script execution.', 'info');
-        document.addEventListener('DOMContentLoaded', execute);
-    } else {
-        logToPopup('DOM already loaded. Executing Phase 8 script immediately.', 'info');
-        execute();
-    }
+    logToPopup('Phase 8 logic is now handled by the background script.', 'info');
+    // This function should no longer be called, but we send a success response
+    // to avoid breaking the chain if it ever is.
+    sendResponse({ status: 'success', message: 'Phase 8 handled by background.' });
 }
 
 

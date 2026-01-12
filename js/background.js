@@ -203,14 +203,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         log(`[Content Script]: New tab URL received: ${message.url}`, 'info');
     }
 
-    if (message.action === 'phase9_readyToAccept') {
-        log('Content script is ready for Phase 9.', 'info');
-        if (!automationInProgress || sender.tab.id !== activeTabId) {
-            log('State mismatch for Phase 9 readiness. Aborting.', 'error');
-            return;
-        }
-        executePhase9();
-    }
+    // The 'phase9_readyToAccept' message is no longer needed, as Phase 8
+    // now directly calls Phase 9 upon completion.
 });
 
 
@@ -238,21 +232,70 @@ function executePhase6() {
     });
 }
 
+/**
+ * Executes the vehicle selection logic directly in the page's main world context.
+ * This avoids CSP violations caused by injecting script tags.
+ */
 function executePhase8() {
     if (!automationInProgress) {
         return resetState('State error in P8.', 'info');
     }
+    log('Executing Phase 8: Selecting vehicle via secure script execution...', 'info');
 
-    log('Executing Phase 8: Selecting vehicle...', 'info');
-
-    sendMessageToContentScript(activeTabId, {
-        action: 'phase8_selectVehicle',
-        vehicleClasses: currentConfig.phase8VehicleClasses
-    }, (response) => {
-        if (!response || response.status !== 'success') {
-            resetState(response ? response.message : 'Phase 8 failed.', 'error');
+    // This function will be executed in the page's context.
+    // It has access to the page's JS variables (like jQuery's $).
+    const selectVehicleInPage = (vehicleClasses) => {
+        try {
+            const $select = $('#vehicle');
+            if (!$select.length) {
+                throw new Error('Vehicle select dropdown (#vehicle) not found.');
+            }
+            $select.select2('open');
+            let matchFound = false;
+            for (const targetText of vehicleClasses) {
+                const option = $select.find('option:not(:disabled)').filter(function() {
+                    return $(this).text().includes(targetText);
+                }).first();
+                if (option.length) {
+                    $select.val(option.val()).trigger('change');
+                    matchFound = true;
+                    break;
+                }
+            }
+            $select.select2('close');
+            if (matchFound) {
+                return { status: 'success', message: 'Vehicle selected successfully.' };
+            } else {
+                throw new Error('No available vehicle found for any of the desired classes.');
+            }
+        } catch (error) {
+            // Ensure the error message is a string for proper serialization.
+            return { status: 'error', message: error.toString() };
         }
-        // Success is handled by the 'phase9_readyToAccept' message listener
+    };
+
+    chrome.scripting.executeScript({
+        target: { tabId: activeTabId },
+        world: 'MAIN',
+        func: selectVehicleInPage,
+        args: [currentConfig.phase8VehicleClasses]
+    }, (injectionResults) => {
+        if (chrome.runtime.lastError) {
+            // Handle errors during script injection itself.
+            resetState(`Phase 8 injection failed: ${chrome.runtime.lastError.message}`, 'error');
+            return;
+        }
+
+        // Check the result from the executed function.
+        const result = injectionResults[0].result;
+        if (result && result.status === 'success') {
+            log('Phase 8 successful: Vehicle selected.', 'success');
+            // Proceed directly to the next phase.
+            executePhase9();
+        } else {
+            // The script executed but returned an error.
+            resetState(result ? result.message : 'Phase 8 failed with an unknown error.', 'error');
+        }
     });
 }
 
@@ -348,15 +391,39 @@ function scheduleNextRefresh(tabId) {
     // --- Schedule the reload ---
     refreshTimeoutId = setTimeout(() => {
         log(`Reloading tab ${tabId} as part of the auto-refresh cycle.`, 'info');
-        chrome.tabs.reload(tabId, (reloaded) => {
-            // After the reload, check if the tab still exists and schedule the next one.
+        chrome.tabs.reload(tabId, () => {
             if (chrome.runtime.lastError) {
                 log(`Failed to reload tab ${tabId}: ${chrome.runtime.lastError.message}. Stopping refresh cycle.`, 'error');
-                resetState('Auto-refresh tab was closed or could not be accessed.', 'error');
-            } else {
-                // Recursively call to continue the loop
-                scheduleNextRefresh(tabId);
+                return resetState('Auto-refresh tab could not be accessed.', 'error');
             }
+
+            // After reloading, we need to wait for the tab to be fully loaded before starting the process.
+            chrome.tabs.onUpdated.addListener(function listener(updatedTabId, changeInfo) {
+                if (updatedTabId === tabId && changeInfo.status === 'complete') {
+                    // Remove this listener to avoid it firing multiple times.
+                    chrome.tabs.onUpdated.removeListener(listener);
+
+                    log('Tab reloaded. Re-injecting content script and starting automation.', 'info');
+
+                    // Set the state to "in progress" *before* starting.
+                    automationInProgress = true;
+                    activeTabId = tabId;
+                    baseTabId = tabId;
+                    chrome.storage.local.set({ automation_in_progress: true });
+
+                    // Re-inject the content script into the reloaded tab.
+                    chrome.scripting.executeScript({
+                        target: { tabId: tabId },
+                        files: ['js/content.js']
+                    }).then(() => {
+                        log('Content script re-injected successfully after refresh.', 'info');
+                        // Restart the entire automation flow from the beginning.
+                        executePhase6();
+                    }).catch(err => {
+                        resetState(`Failed to re-inject script after refresh: ${err.message}`, 'error');
+                    });
+                }
+            });
         });
     }, randomInterval);
 }
