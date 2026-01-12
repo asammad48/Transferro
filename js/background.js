@@ -302,6 +302,13 @@ function executePhase9() {
         return resetState('State error in P9.', 'info');
     }
 
+    // Check if the user has disabled the final click.
+    if (!currentConfig.enablePhase9Click) {
+        log('Phase 9 click is disabled by user. Automation ending.', 'success');
+        resetState('Automation complete (Phase 9 click skipped).', 'success');
+        return;
+    }
+
     // Announce the action before performing it.
     chrome.tts.speak('Ride is being accepted');
 
@@ -311,6 +318,7 @@ function executePhase9() {
         if (response && response.status === 'success') {
             resetState('Automation complete!', 'success');
         } else {
+            // The triggerFailureAlarm function is already called by resetState on error.
             resetState(response ? response.message : 'Phase 9 failed.', 'error');
         }
     });

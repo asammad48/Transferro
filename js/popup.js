@@ -10,13 +10,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const vehicleClass = document.getElementById('vehicle-class');
     const priceInputsContainer = document.getElementById('price-inputs-container');
     const phase8VehicleClass = document.getElementById('phase8-vehicle-class');
+    const phase9ClickToggle = document.getElementById('phase9-click-toggle');
     const autoRefreshToggle = document.getElementById('auto-refresh-toggle');
     const proceedButton = document.getElementById('proceed-button');
     const abortButton = document.getElementById('abort-button');
     const clearLogButton = document.getElementById('clear-log-button');
     const logPanel = document.getElementById('log-panel');
 
-    const ALL_INPUTS = [startDate, endDate, vehicleClass, phase8VehicleClass, autoRefreshToggle];
+    const ALL_INPUTS = [startDate, endDate, vehicleClass, phase8VehicleClass, phase9ClickToggle, autoRefreshToggle];
 
     // --- State Management ---
 
@@ -44,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
             vehicleClass: selectedVehicles,
             vehiclePrices: vehiclePrices, // Save prices
             phase8VehicleClass: Array.from(phase8VehicleClass.selectedOptions).map(option => option.value),
+            enablePhase9Click: phase9ClickToggle.checked,
             autoRefresh: autoRefreshToggle.checked,
         };
         chrome.storage.local.set({ settings });
@@ -76,6 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     option.selected = selectedPhase8Vehicles.includes(option.value);
                 });
 
+                phase9ClickToggle.checked = data.settings.enablePhase9Click !== false; // Default to true if not set
                 autoRefreshToggle.checked = data.settings.autoRefresh === true;
             }
         });
@@ -176,6 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
             vehicleClasses: selectedVehicles,
             vehiclePrices: vehiclePrices,
             phase8VehicleClasses: Array.from(phase8VehicleClass.selectedOptions).map(o => o.value),
+            enablePhase9Click: phase9ClickToggle.checked,
             autoRefresh: autoRefreshToggle.checked
         };
 
