@@ -217,19 +217,29 @@ function executePhase6() {
         return resetState('State error in P6.', 'info');
     }
 
-    log('Executing Phase 6: Finding and clicking booking...', 'info');
+    log('Waiting 2 seconds before starting Phase 6...', 'info');
 
-    sendMessageToContentScript(activeTabId, {
-        action: 'phase6_clickBooking',
-        ...currentConfig
-    }, (response) => {
-        if (response && response.status === 'success') {
-            log('Phase 6 successful.', 'success');
-            // Phase 8 will be triggered by the new tab listener.
-        } else {
-            resetState(response ? response.message : 'Phase 6 failed.', 'error');
+    setTimeout(() => {
+        // Re-check state in case the user aborted during the delay
+        if (!automationInProgress) {
+            log('Automation aborted during Phase 6 delay.', 'info');
+            return;
         }
-    });
+
+        log('Executing Phase 6: Finding and clicking booking...', 'info');
+
+        sendMessageToContentScript(activeTabId, {
+            action: 'phase6_clickBooking',
+            ...currentConfig
+        }, (response) => {
+            if (response && response.status === 'success') {
+                log('Phase 6 successful.', 'success');
+                // Phase 8 will be triggered by the new tab listener.
+            } else {
+                resetState(response ? response.message : 'Phase 6 failed.', 'error');
+            }
+        });
+    }, 2000);
 }
 
 /**
@@ -343,17 +353,25 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             log(`Retaining automation state for new tab.`, 'info');
             activeTabId = tabId; // Update the active tab ID to the new tab.
 
-            // Inject the content script into the new tab programmatically
-            chrome.scripting.executeScript({
-                target: { tabId: activeTabId },
-                files: ['js/content.js']
-            }).then(() => {
-                log('Content script injected into new tab.', 'info');
-                // Now that the script is injected, we can proceed with Phase 8.
-                executePhase8();
-            }).catch(err => {
-                 resetState(`Failed to inject script into new tab: ${err.message}`, 'error');
-            });
+            log('Waiting 2 seconds before starting Phase 8...', 'info');
+            setTimeout(() => {
+                // Re-check state in case the user aborted during the delay
+                if (!automationInProgress) {
+                    log('Automation aborted during Phase 8 delay.', 'info');
+                    return;
+                }
+                // Inject the content script into the new tab programmatically
+                chrome.scripting.executeScript({
+                    target: { tabId: activeTabId },
+                    files: ['js/content.js']
+                }).then(() => {
+                    log('Content script injected into new tab.', 'info');
+                    // Now that the script is injected, we can proceed with Phase 8.
+                    executePhase8();
+                }).catch(err => {
+                     resetState(`Failed to inject script into new tab: ${err.message}`, 'error');
+                });
+            }, 2000);
         }
     });
 });
