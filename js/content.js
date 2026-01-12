@@ -29,7 +29,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   switch (message.action) {
     case 'phase6_clickBooking':
-      phase6_clickBooking(message.startDate, message.endDate, message.vehicleClasses, sendResponse);
+      phase6_clickBooking(message.startDate, message.endDate, message.vehicleClasses, message.vehiclePrices, sendResponse);
       return true; // Indicates an asynchronous response.
 
     case 'phase8_selectVehicle':
@@ -54,10 +54,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 /**
  * Finds and clicks the first valid booking element on the page.
- * It iterates through all potential elements, applying strict date and vehicle class checks.
+ * It iterates through all potential elements, applying strict date, vehicle class, and price checks.
  * Detailed logs are sent to the popup at each step of the validation process.
  */
-function phase6_clickBooking(startDateStr, endDateStr, vehicleClasses, sendResponse) {
+function phase6_clickBooking(startDateStr, endDateStr, vehicleClasses, vehiclePrices, sendResponse) {
     const bookingElements = document.querySelectorAll('div.row.the_booking');
     logToPopup(`Found ${bookingElements.length} potential booking element(s).`);
 
@@ -102,7 +102,26 @@ function phase6_clickBooking(startDateStr, endDateStr, vehicleClasses, sendRespo
             logToPopup(`${logPrefix} Vehicle mismatch. (Not one of: "${vehicleClasses.join(', ')}").`);
         }
 
-        if (dateMatch && vehicleMatch) {
+        // Find the original vehicle name (with original casing) to look up the price
+        const originalVehicleName = vehicleClasses.find(vc => vc.toLowerCase() === actualVehicle);
+        const userPrice = vehiclePrices[originalVehicleName];
+
+        const priceElement = bookingElement.querySelector('span.partner_payout');
+        let priceMatch = false;
+        if (priceElement) {
+            const actualPrice = parseFloat(priceElement.textContent.trim());
+            logToPopup(`${logPrefix} Found Payout: "${actualPrice}". User's min payout: "${userPrice}".`);
+            if (!isNaN(actualPrice) && actualPrice >= userPrice) {
+                priceMatch = true;
+            } else {
+                logToPopup(`${logPrefix} Payout mismatch. (Actual: ${actualPrice}, User Min: ${userPrice}).`);
+            }
+        } else {
+            logToPopup(`${logPrefix} Price element (.partner_payout) not found.`, 'error');
+        }
+
+
+        if (dateMatch && vehicleMatch && priceMatch) {
             logToPopup(`${logPrefix} Match found! Preparing to open new tab.`, 'success');
 
             const onclickAttr = bookingElement.getAttribute('onclick');
@@ -157,9 +176,9 @@ function phase8_selectVehicle(vehicleClasses, sendResponse) {
 function phase9_acceptRide(sendResponse) {
   try {
     logToPopup('Attempting to find final confirmation button.');
-    const finalButton = getElementByXPath('//*[@id="ass_vehicle_div"]');
+    const finalButton = getElementByXPath('//*[@id="accept_ride"]');
     if (!finalButton || !isElementVisible(finalButton)) {
-      logToPopup('Final confirmation button not found or not visible.', 'error');
+      logToPopup('Final confirmation button (#accept_ride) not found or not visible.', 'error');
       throw new Error('Final confirmation button not found or not visible.');
     }
     logToPopup('Final confirmation button found.');

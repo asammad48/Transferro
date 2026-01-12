@@ -302,12 +302,23 @@ function executePhase9() {
         return resetState('State error in P9.', 'info');
     }
 
+    // Check if the user has disabled the final click.
+    if (!currentConfig.enablePhase9Click) {
+        log('Phase 9 click is disabled by user. Automation ending.', 'success');
+        resetState('Automation complete (Phase 9 click skipped).', 'success');
+        return;
+    }
+
+    // Announce the action before performing it.
+    chrome.tts.speak('Ride is being accepted');
+
     log('Executing Phase 9: Clicking final confirmation...', 'info');
 
     sendMessageToContentScript(activeTabId, { action: 'phase9_acceptRide' }, (response) => {
         if (response && response.status === 'success') {
             resetState('Automation complete!', 'success');
         } else {
+            // The triggerFailureAlarm function is already called by resetState on error.
             resetState(response ? response.message : 'Phase 9 failed.', 'error');
         }
     });
@@ -371,11 +382,8 @@ function attemptPhase8WithRetries(attemptsLeft) {
 
     if (attemptsLeft <= 0) {
         log('Phase 8 failed after all retries. Restarting the process.', 'error');
-        // Close the current failed tab before restarting.
-        chrome.tabs.remove(activeTabId, () => {
-            // Reset state and trigger the auto-refresh/restart logic.
-            resetState('Phase 8 failed permanently.', 'error');
-        });
+        // The tab is no longer closed. The process will restart, eventually refreshing the base tab.
+        resetState('Phase 8 failed permanently.', 'error');
         return;
     }
 
